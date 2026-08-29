@@ -7,11 +7,17 @@ from pyrogram import enums
 
 # برای پهن‌تر شدن حباب پیام و در نتیجه کشیده‌تر شدن دکمه‌های اینلاین
 # از فاصله‌های یونیکد در یک خط جدا استفاده می‌شود.
-MENU_WIDTH_PAD = "\n" + ("\u2007" * 48)
+MENU_WIDTH_PAD = "\n" + ("\u2007" * 96)
 
 async def safe_edit_message(message, *args, **kwargs):
-    """ویرایش امن پیام؛ اگر متن/کیبورد تغییری نکرده بود خطا ندهد."""
+    """ویرایش امن پیام و حفظ عرض زیاد حباب برای دکمه‌های تمام‌عرض."""
     try:
+        args = list(args)
+        # تلگرام عرض دکمه‌های Inline را از عرض حباب پیام محاسبه می‌کند.
+        # برای تمام صفحات دارای کیبورد، یک خط نامرئی پهن اضافه می‌کنیم.
+        if kwargs.get("reply_markup") is not None and args and isinstance(args[0], str):
+            if MENU_WIDTH_PAD not in args[0]:
+                args[0] += MENU_WIDTH_PAD
         return await message.edit_text(*args, **kwargs)
     except MessageNotModified:
         return None
@@ -32,9 +38,10 @@ HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
 os.makedirs("sessions", exist_ok=True)
 
 # لیست کانال ها کم یا زیاد میتونید کنید بدون @
-FORCE_CHANNELS = [
-    "SH0PAL1",
-]
+# این ربات شخصی است؛ عضویت اجباری به‌صورت پیش‌فرض غیرفعال است.
+# اگر بعداً خواستی کانالی اضافه کنی، یوزرنیم واقعی کانال را اینجا بگذار.
+FORCE_CHANNELS = []  # نسخه پابلیک: عضویت اجباری غیرفعال
+
 
 
 COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
@@ -462,6 +469,10 @@ async def finish_group_bet(client, bet_key):
             except:
                 pass
 async def check_force_join(client, user_id):
+    # برای استفاده شخصی، اگر کانالی تعریف نشده باشد مستقیم اجازه بده.
+    if not FORCE_CHANNELS:
+        return True, []
+
     not_joined = []
 
     for ch in FORCE_CHANNELS:
@@ -624,7 +635,7 @@ def stop_all_selfbots():
         db.save_data()
     except: 
         pass
-@bot.on_message(filters.group & filters.user(ADMIN_ID) & filters.regex(r'^موجودی$'))
+@bot.on_message(filters.group & filters.regex(r'^موجودی$'))
 async def group_balance_simple(client, message: Message):
     user_id = message.from_user.id
     ok, not_joined = await check_force_join(client, user_id)
@@ -683,7 +694,7 @@ async def set_credits(client, message: Message):
         
     except: 
         await message.reply_text("❌ آیدی/تعداد باید عدد باشد")
-@bot.on_message(filters.group & filters.user(ADMIN_ID) & filters.regex(r'^شرطبندی\s+(\d+)(?:\s*سکه)?$'))
+@bot.on_message(filters.group & filters.regex(r'^شرطبندی\s+(\d+)(?:\s*سکه)?$'))
 async def group_bet_handler(client, message: Message):
     chat_id = message.chat.id
     creator_id = message.from_user.id
@@ -1217,60 +1228,45 @@ async def admin_panel(client, message: Message):
     
     await message.reply_text(stats_text, reply_markup=keyboard)
 def create_main_menu(user_id):
-    """منوی اصلی با چیدمان ۶ بخشی و دکمه‌های پهن مشابه نمونه مرجع."""
+    """منوی اصلی یکدست: همه دکمه‌ها تمام‌عرض، مرتب و رنگی."""
     return InlineKeyboardMarkup([
-        # بخش ۱: یک دکمه تمام‌عرض
         [InlineKeyboardButton(
             "🛒 خرید سلف",
             callback_data="increase_balance",
             style=KeyboardButtonStyle(bg_success=True)
         )],
-
-        # بخش ۲: دو دکمه کنار هم
-        [
-            InlineKeyboardButton(
-                "👤 حساب کاربری",
-                callback_data="status_credits",
-                style=KeyboardButtonStyle(bg_primary=True)
-            ),
-            InlineKeyboardButton(
-                "👥 زیرمجموعه",
-                callback_data="referral",
-                style=KeyboardButtonStyle(bg_success=True)
-            )
-        ],
-
-        # بخش ۳: یک دکمه تمام‌عرض
         [InlineKeyboardButton(
-            "⚙️ مدیریت بات ⚙️",
+            "👤 حساب کاربری",
+            callback_data="status_credits",
+            style=KeyboardButtonStyle(bg_primary=True)
+        )],
+        [InlineKeyboardButton(
+            "👥 زیرمجموعه",
+            callback_data="referral",
+            style=KeyboardButtonStyle(bg_success=True)
+        )],
+        [InlineKeyboardButton(
+            "⚙️ مدیریت سلف بات",
             callback_data="self_management",
             style=KeyboardButtonStyle(bg_primary=True)
         )],
-
-        # بخش ۴: دو دکمه کنار هم
-        [
-            InlineKeyboardButton(
-                "• راهنمای خرید •",
-                callback_data="buy_guide",
-                style=KeyboardButtonStyle(bg_primary=True)
-            ),
-            InlineKeyboardButton(
-                "• خرید الماس •",
-                callback_data="increase_balance",
-                style=KeyboardButtonStyle(bg_success=True)
-            )
-        ],
-
-        # بخش ۵: یک دکمه تمام‌عرض
         [InlineKeyboardButton(
-            "👨‍💻 پشتیبانی 👨‍💻",
+            "📖 راهنمای خرید",
+            callback_data="buy_guide",
+            style=KeyboardButtonStyle(bg_primary=True)
+        )],
+        [InlineKeyboardButton(
+            "💎 افزایش موجودی",
+            callback_data="increase_balance",
+            style=KeyboardButtonStyle(bg_success=True)
+        )],
+        [InlineKeyboardButton(
+            "👨‍💻 پشتیبانی",
             callback_data="support",
             style=KeyboardButtonStyle(bg_success=True)
         )],
-
-        # بخش ۶: یک دکمه تمام‌عرض
         [InlineKeyboardButton(
-            "📣 چنل ما 📣",
+            "📣 چنل ما",
             callback_data="buy_channel",
             style=KeyboardButtonStyle(bg_primary=True)
         )]
@@ -1303,8 +1299,6 @@ async def show_main_menu(client, chat_id, user):
         db.set("credits", user_id, 5)
         credits = 5
 
-    # ادمین هم باید بتواند ربات را مثل یک کاربر عادی استفاده کند.
-    # پنل مدیریت فقط با دستور /admin باز می‌شود.
     user_data = db.get("users", user_id, {})
     status = "🟢 فعال" if user_data.get('status') == 'active' else "🔴 غیرفعال"
     phone = user_data.get('phone', '')
@@ -1331,6 +1325,9 @@ async def show_main_menu(client, chat_id, user):
 async def callback_handler(client, callback_query):
     user_id = callback_query.from_user.id
     data = callback_query.data
+
+    # همه کاربران می‌توانند از منوی اصلی استفاده کنند.
+    # فقط عملیات مدیریتی پایین‌تر با ADMIN_ID محدود شده‌اند.
 
     # ==============================
     # زیرمجموعه
@@ -1459,29 +1456,16 @@ async def callback_handler(client, callback_query):
             return
         await admin_callback_handler(client, callback_query)
         return
-    if data == "login":
-        credits = db.get("credits", user_id, 0)
-        if credits <= 0:
-            await safe_edit_message(callback_query.message, 
-                f"❌ **سکه کافی ندارید!**\n\n💰 سکه های شما: `{credits}`\n\n💡 برای دریافت سکه با پشتیبانی تماس بگیرید.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-            )
-            return
-            
-        await safe_edit_message(callback_query.message, 
-            "📱 **لطفا شماره تلفن خود را ارسال کنید:**\n\n"
-            "**فرمت:** +989123456789\n\n"
-            "⚠️ شماره باید با کد کشور شروع شود",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-        )
-        await callback_query.answer()
-    
-    elif data == "login_again":
-        await safe_edit_message(callback_query.message, 
-            "📱 **لطفا شماره تلفن جدید خود را ارسال کنید:**\n\n"
-            "**فرمت:** +989123456789\n\n"
-            "⚠️ شماره باید با کد کشور شروع شود",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
+    if data in ("login", "login_again"):
+        await safe_edit_message(
+            callback_query.message,
+            "🔐 **اتصال حساب شخصی**\n\n"
+            "برای امنیت کاربران، نسخه پابلیک این ربات شماره تلفن، کد ورود تلگرام، "
+            "رمز دو مرحله‌ای یا Session کاربران را دریافت نمی‌کند.\n\n"
+            "برای اتصال سلف، باید کلاینت شخصی روی دستگاه یا سرور خود کاربر اجرا شود.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
+            ])
         )
         await callback_query.answer()
     elif data == "status_credits":
@@ -1717,26 +1701,30 @@ async def callback_handler(client, callback_query):
         await callback_query.answer("✅ لطفا تعداد سکه مورد نظر را وارد کنید")
 
     elif data == "back":
-        # بازگشت برای همه کاربران، از جمله ادمین، به منوی اصلی عادی انجام می‌شود.
-        credits = db.get("credits", user_id, 0)
-        user_data = db.get("users", user_id, {})
-        
-        status_text = "🔴 سلف غیرفعال"
-        phone_text = ""
-        
-        if user_data and user_data.get('status') == 'active':
-            status_text = "🟢 سلف فعال"
-            phone_text = f"\n📱 شماره: {user_data.get('phone', '')}"
-        
-        keyboard = create_main_menu(user_id)
-        text = (
-            f"🤖 **ربات مدیریت سلف بات**\n\n"
-            f"**وضعیت:** {status_text}{phone_text}\n"
-            f"**💰 سکه ها:** `{credits}` سکه\n"
-            f"**⏰ مصرف:** 1 سکه در ساعت\n"
-            f"{MENU_WIDTH_PAD}"
-        )
-        await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
+        if user_id != ADMIN_ID:
+            credits = db.get("credits", user_id, 0)
+            user_data = db.get("users", user_id, {})
+            
+            status_text = "🔴 سلف غیرفعال"
+            phone_text = ""
+            
+            if user_data and user_data.get('status') == 'active':
+                status_text = f"🟢 سلف فعال"
+                phone_text = f"\n📱 شماره: {user_data.get('phone', '')}"
+            
+            keyboard = create_main_menu(user_id)
+            
+            text = (
+                f"🤖 **ربات مدیریت سلف بات**\n\n"
+                f"**وضعیت:** {status_text}{phone_text}\n"
+                f"**💰 سکه ها:** `{credits}` سکه\n"
+                f"**⏰ مصرف:** 1 سکه در ساعت\n"
+                f"{MENU_WIDTH_PAD}"
+            )
+            
+            await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
+        else:
+            await admin_panel(client, callback_query.message)
         await callback_query.answer()
     
     elif data == "check_join":
@@ -1775,8 +1763,6 @@ async def handle_admin_input(client, message: Message):
         except: pass
 @bot.on_message(filters.command("start"))
 async def start_handler(client, message: Message):
-    # همه کاربران می‌توانند ربات را با /start استفاده کنند.
-    # فقط امکانات مدیریتی همچنان مخصوص ADMIN_ID باقی می‌ماند.
     ok, not_joined = await check_force_join(client, message.from_user.id)
     if not ok:
         buttons = []
@@ -1789,7 +1775,7 @@ async def start_handler(client, message: Message):
         )
         return
 
-    # /start همیشه منوی اصلی را باز می‌کند؛ پنل مدیریت فقط با /admin در دسترس است.
+    print(f"📩 /start received from {message.from_user.id} ({message.from_user.first_name or 'Unknown'})", flush=True)
     await show_main_menu(client, message.chat.id, message.from_user)
 @bot.on_callback_query(filters.regex(r'^joinbet_(-?\d+)_(-?\d+)$'))
 async def join_group_bet_handler(client, callback_query):
@@ -1972,53 +1958,11 @@ async def check_join(client, callback_query):
     )
 @bot.on_message(filters.private & filters.regex(r'^\+\d{10,15}$'))
 async def handle_phone(client, message: Message):
-    user_id, phone = message.from_user.id, message.text
-    
-    if user_id in active_clients:
-        try:
-            await active_clients[user_id].disconnect()
-            del active_clients[user_id]
-        except:
-            pass
-    
-    credits = db.get("credits", user_id, 0)
-    if credits <= 0:
-        await message.reply_text(f"❌ سکه کافی ندارید!\nسکه های شما: {credits}")
-        return
-    
-    try:
-        session_name = f"sessions/{user_id}"
-        temp_client = Client(session_name, api_id=API_ID, api_hash=API_HASH)
-        await temp_client.connect()
-        
-        active_clients[user_id] = temp_client
-        sent_code = await temp_client.send_code(phone)
-        user_data = db.get("users", user_id, {})
-        user_data["phone"] = phone
-        db.set("users", user_id, user_data)
-        await message.reply_text(
-            "✅ **کد تأیید ارسال شد**\n\n"
-            "🔢 **کد ۵ رقمی را با دکمه‌های زیر وارد کنید:**\n\n"
-            f"<b><code>{format_code_display('')}</code></b>\n\n"
-            "📱 کد ارسال شده به شماره شما",
-            reply_markup=create_numpad_keyboard(),
-            parse_mode=enums.ParseMode.HTML
-        )
-        
-        db.set("temp_data", user_id, {
-            "phone": phone, 
-            "phone_code_hash": sent_code.phone_code_hash,
-            "client_active": True
-        })
-        
-    except Exception as e:
-        await message.reply_text(f"❌ **خطا:** {str(e)}")
-        if user_id in active_clients:
-            try:
-                await active_clients[user_id].disconnect()
-                del active_clients[user_id]
-            except:
-                pass
+    await message.reply_text(
+        "🔐 برای امنیت شما، نسخه پابلیک این ربات شماره تلفن را برای ورود به حساب تلگرام دریافت نمی‌کند. "
+        "لطفاً شماره، کد ورود یا رمز دو مرحله‌ای خود را در ربات ارسال نکنید."
+    )
+
 @bot.on_message(filters.private & filters.text)
 async def handle_all_messages(client, message: Message):
     user_id = message.from_user.id
@@ -2066,44 +2010,13 @@ async def handle_all_messages(client, message: Message):
             await message.reply_text("❌ لطفا یک عدد معتبر وارد کنید")
         return
 
+    # نسخه پابلیک عمداً رمز دو مرحله‌ای یا اعتبارنامه تلگرام کاربران را پردازش نمی‌کند.
     temp_data = db.get("temp_data", user_id)
     if temp_data and temp_data.get("needs_password"):
-        try:
-            if user_id not in active_clients:
-                await message.reply_text("❌ کلاینت فعال نیست. لطفا دوباره شماره را ارسال کنید.")
-                return
-            
-            user_client = active_clients[user_id]
-            await user_client.check_password(text)
-            
-            user_info = {
-                "phone": temp_data["phone"],
-                "status": "active",
-                "created_at": time.time(),
-                "last_active": time.time(),
-                }
-            db.set("users", user_id, user_info)
-            db.delete("temp_data", user_id)
-            
-            if user_id in active_clients:
-                try:
-                    await active_clients[user_id].disconnect()
-                    del active_clients[user_id]
-                except:
-                    pass
-            
-            if run_selfbot(user_id, temp_data["phone"]):
-                credits = db.get("credits", user_id, 0)
-                await message.reply_text(
-                    f"✅ **سلف بات فعال شد!**\n\n"
-                    f"💰 سکه های شما: {credits}\n"
-                    f"⏰ زمان باقی‌مانده: {credits} ساعت"
-                )
-            else: 
-                await message.reply_text("❌ خطا در اجرای سلف")
-            
-        except Exception as e: 
-            await message.reply_text(f"❌ رمز اشتباه: {str(e)}")
+        db.delete("temp_data", user_id)
+        await message.reply_text(
+            "🔐 برای امنیت شما، این ربات رمز دو مرحله‌ای تلگرام را دریافت یا ذخیره نمی‌کند."
+        )
         return
 
     if user_id == ADMIN_ID:
@@ -2169,8 +2082,19 @@ async def handle_card_photo(client, message: Message):
         except Exception as e:
             await message.reply_text("❌ خطا در ارسال به ادمین. لطفا بعدا تلاش کنید.")
 def main():
-    print("● ربات سلف ساز روشن شد ●")
-    try: 
+    print("● ربات پابلیک روشن شد ●", flush=True)
+    print("🌍 حالت عمومی: همه کاربران می‌توانند /start کنند.", flush=True)
+    print("🔐 ورود با شماره/کد/رمز تلگرام در نسخه پابلیک غیرفعال است.", flush=True)
+    print(f"👤 ADMIN_ID: {ADMIN_ID}", flush=True)
+    print(f"📢 FORCE_CHANNELS: {FORCE_CHANNELS}", flush=True)
+    if not isinstance(ADMIN_ID, int) or ADMIN_ID <= 0:
+        print("❌ ADMIN_ID تنظیم نشده یا نامعتبر است. آیدی عددی اکانت تلگرام خود را در ADMIN_ID وارد کن.", flush=True)
+        return
+    if not BOT_TOKEN or BOT_TOKEN == "00000":
+        print("❌ BOT_TOKEN تنظیم نشده یا نامعتبر است.", flush=True)
+        return
+    try:
+        print("⏳ در حال اتصال و دریافت آپدیت‌ها...", flush=True)
         bot.run()
     except KeyboardInterrupt: 
         print("\n🛑 توقف ربات...")
