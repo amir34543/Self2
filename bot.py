@@ -18,15 +18,15 @@ async def safe_edit_message(message, *args, **kwargs):
 
 user_temp_codes = {}
 active_clients = {}
-BOT_TOKEN = "00000"
-API_ID = 00000
-API_HASH = "00000"
-ADMIN_ID = 000000
+BOT_TOKEN = "8674957786:AAHcKmPkUhR630w5pmkrifnxO9Yf8SCuVm"
+API_ID = 35656061
+API_HASH = "b37f2596516bc0439bf505d1d230395c"
+ADMIN_ID = 7845464086
 
 # تنظیمات منوی جدید
 # یوزرنیم‌ها را بدون @ وارد کنید
-SUPPORT_USERNAME = "YourSupportUsername"
-BUY_CHANNEL_USERNAME = "YourChannelUsername"
+SUPPORT_USERNAME = "Aliconfigs"
+BUY_CHANNEL_USERNAME = "SelfPersiangulf"
 HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
 
 os.makedirs("sessions", exist_ok=True)
