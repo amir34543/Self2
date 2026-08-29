@@ -18,7 +18,7 @@ async def safe_edit_message(message, *args, **kwargs):
 
 user_temp_codes = {}
 active_clients = {}
-BOT_TOKEN = "8674957786:AAHcKmPkUhR630w5pmkrifnxO9Yf8SCuVm"
+BOT_TOKEN = "8876742932:AAHkfGQMsNEDH_bSQemz5p4NLdMtJOTOiTM"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 ADMIN_ID = 7845464086
@@ -32,9 +32,10 @@ HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
 os.makedirs("sessions", exist_ok=True)
 
 # لیست کانال ها کم یا زیاد میتونید کنید بدون @
-# این ربات شخصی است؛ عضویت اجباری به‌صورت پیش‌فرض غیرفعال است.
-# اگر بعداً خواستی کانالی اضافه کنی، یوزرنیم واقعی کانال را اینجا بگذار.
-FORCE_CHANNELS = []
+FORCE_CHANNELS = [
+    "SH0PAL1",
+    
+]
 
 
 COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
@@ -462,10 +463,6 @@ async def finish_group_bet(client, bet_key):
             except:
                 pass
 async def check_force_join(client, user_id):
-    # برای استفاده شخصی، اگر کانالی تعریف نشده باشد مستقیم اجازه بده.
-    if not FORCE_CHANNELS:
-        return True, []
-
     not_joined = []
 
     for ch in FORCE_CHANNELS:
@@ -1292,6 +1289,10 @@ async def show_main_menu(client, chat_id, user):
         db.set("credits", user_id, 5)
         credits = 5
 
+    if user_id == ADMIN_ID:
+        await client.send_message(chat_id, "🔐 پنل مدیریت ادمین فعال است.")
+        return
+
     user_data = db.get("users", user_id, {})
     status = "🟢 فعال" if user_data.get('status') == 'active' else "🔴 غیرفعال"
     phone = user_data.get('phone', '')
@@ -1319,8 +1320,10 @@ async def callback_handler(client, callback_query):
     user_id = callback_query.from_user.id
     data = callback_query.data
 
-    # همه کاربران می‌توانند از منوی اصلی استفاده کنند.
-    # فقط عملیات مدیریتی پایین‌تر با ADMIN_ID محدود شده‌اند.
+    # این ربات فقط برای استفاده شخصی مالک تنظیم شده است.
+    if user_id != ADMIN_ID:
+        await callback_query.answer("❌ این ربات فقط برای استفاده شخصی مالک فعال است.", show_alert=True)
+        return
 
     # ==============================
     # زیرمجموعه
@@ -1767,7 +1770,7 @@ async def handle_admin_input(client, message: Message):
         try:
             await bot.send_message(set_target, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
         except: pass
-@bot.on_message(filters.command("start"))
+@bot.on_message(filters.command("start") & filters.user(ADMIN_ID))
 async def start_handler(client, message: Message):
     ok, not_joined = await check_force_join(client, message.from_user.id)
     if not ok:
@@ -1781,7 +1784,10 @@ async def start_handler(client, message: Message):
         )
         return
 
-    print(f"📩 /start received from {message.from_user.id} ({message.from_user.first_name or 'Unknown'})", flush=True)
+    if message.from_user.id == ADMIN_ID:
+        await admin_panel(client, message)
+        return
+
     await show_main_menu(client, message.chat.id, message.from_user)
 @bot.on_callback_query(filters.regex(r'^joinbet_(-?\d+)_(-?\d+)$'))
 async def join_group_bet_handler(client, callback_query):
@@ -1962,7 +1968,7 @@ async def check_join(client, callback_query):
         "❌ هنوز عضو همه کانال‌ها نیستید!",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
-@bot.on_message(filters.private & filters.regex(r'^\+\d{10,15}$'))
+@bot.on_message(filters.private & filters.user(ADMIN_ID) & filters.regex(r'^\+\d{10,15}$'))
 async def handle_phone(client, message: Message):
     user_id, phone = message.from_user.id, message.text
     
@@ -2011,7 +2017,7 @@ async def handle_phone(client, message: Message):
                 del active_clients[user_id]
             except:
                 pass
-@bot.on_message(filters.private & filters.text)
+@bot.on_message(filters.private & filters.user(ADMIN_ID) & filters.text)
 async def handle_all_messages(client, message: Message):
     user_id = message.from_user.id
     text = message.text
@@ -2114,7 +2120,7 @@ async def handle_all_messages(client, message: Message):
             return
     
     pass
-@bot.on_message(filters.photo & filters.private)
+@bot.on_message(filters.photo & filters.private & filters.user(ADMIN_ID))
 async def handle_card_photo(client, message: Message):
     user_id = message.from_user.id
     
@@ -2161,17 +2167,8 @@ async def handle_card_photo(client, message: Message):
         except Exception as e:
             await message.reply_text("❌ خطا در ارسال به ادمین. لطفا بعدا تلاش کنید.")
 def main():
-    print("● ربات سلف ساز روشن شد ●", flush=True)
-    print(f"👤 ADMIN_ID: {ADMIN_ID}", flush=True)
-    print(f"📢 FORCE_CHANNELS: {FORCE_CHANNELS}", flush=True)
-    if not isinstance(ADMIN_ID, int) or ADMIN_ID <= 0:
-        print("❌ ADMIN_ID تنظیم نشده یا نامعتبر است. آیدی عددی اکانت تلگرام خود را در ADMIN_ID وارد کن.", flush=True)
-        return
-    if not BOT_TOKEN or BOT_TOKEN == "00000":
-        print("❌ BOT_TOKEN تنظیم نشده یا نامعتبر است.", flush=True)
-        return
-    try:
-        print("⏳ در حال اتصال و دریافت آپدیت‌ها...", flush=True)
+    print("● ربات سلف ساز روشن شد ●")
+    try: 
         bot.run()
     except KeyboardInterrupt: 
         print("\n🛑 توقف ربات...")
