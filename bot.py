@@ -1217,45 +1217,60 @@ async def admin_panel(client, message: Message):
     
     await message.reply_text(stats_text, reply_markup=keyboard)
 def create_main_menu(user_id):
-    """منوی اصلی یکدست: همه دکمه‌ها تمام‌عرض، مرتب و رنگی."""
+    """منوی اصلی با چیدمان ۶ بخشی و دکمه‌های پهن مشابه نمونه مرجع."""
     return InlineKeyboardMarkup([
+        # بخش ۱: یک دکمه تمام‌عرض
         [InlineKeyboardButton(
             "🛒 خرید سلف",
             callback_data="increase_balance",
             style=KeyboardButtonStyle(bg_success=True)
         )],
+
+        # بخش ۲: دو دکمه کنار هم
+        [
+            InlineKeyboardButton(
+                "👤 حساب کاربری",
+                callback_data="status_credits",
+                style=KeyboardButtonStyle(bg_primary=True)
+            ),
+            InlineKeyboardButton(
+                "👥 زیرمجموعه",
+                callback_data="referral",
+                style=KeyboardButtonStyle(bg_success=True)
+            )
+        ],
+
+        # بخش ۳: یک دکمه تمام‌عرض
         [InlineKeyboardButton(
-            "👤 حساب کاربری",
-            callback_data="status_credits",
-            style=KeyboardButtonStyle(bg_primary=True)
-        )],
-        [InlineKeyboardButton(
-            "👥 زیرمجموعه",
-            callback_data="referral",
-            style=KeyboardButtonStyle(bg_success=True)
-        )],
-        [InlineKeyboardButton(
-            "⚙️ مدیریت سلف بات",
+            "⚙️ مدیریت بات ⚙️",
             callback_data="self_management",
             style=KeyboardButtonStyle(bg_primary=True)
         )],
+
+        # بخش ۴: دو دکمه کنار هم
+        [
+            InlineKeyboardButton(
+                "• راهنمای خرید •",
+                callback_data="buy_guide",
+                style=KeyboardButtonStyle(bg_primary=True)
+            ),
+            InlineKeyboardButton(
+                "• خرید الماس •",
+                callback_data="increase_balance",
+                style=KeyboardButtonStyle(bg_success=True)
+            )
+        ],
+
+        # بخش ۵: یک دکمه تمام‌عرض
         [InlineKeyboardButton(
-            "📖 راهنمای خرید",
-            callback_data="buy_guide",
-            style=KeyboardButtonStyle(bg_primary=True)
-        )],
-        [InlineKeyboardButton(
-            "💎 افزایش موجودی",
-            callback_data="increase_balance",
-            style=KeyboardButtonStyle(bg_success=True)
-        )],
-        [InlineKeyboardButton(
-            "👨‍💻 پشتیبانی",
+            "👨‍💻 پشتیبانی 👨‍💻",
             callback_data="support",
             style=KeyboardButtonStyle(bg_success=True)
         )],
+
+        # بخش ۶: یک دکمه تمام‌عرض
         [InlineKeyboardButton(
-            "📣 چنل ما",
+            "📣 چنل ما 📣",
             callback_data="buy_channel",
             style=KeyboardButtonStyle(bg_primary=True)
         )]
