@@ -1,4 +1,4 @@
-لغوfrom pyrogram import Client, filters
+from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
 import json, os, asyncio, subprocess, sys, time, threading, random
@@ -18,22 +18,24 @@ async def safe_edit_message(message, *args, **kwargs):
 
 user_temp_codes = {}
 active_clients = {}
-BOT_TOKEN = "8876742932:AAHkfGQMsNEDH_bSQemz5p4NLdMtJOTOiTM"
-API_ID = 35656061
-API_HASH = "b37f2596516bc0439bf505d1d230395c"
-ADMIN_ID = 7845464086
+BOT_TOKEN = "00000"
+API_ID = 00000
+API_HASH = "00000"
+ADMIN_ID = 000000
 
 # تنظیمات منوی جدید
 # یوزرنیم‌ها را بدون @ وارد کنید
-SUPPORT_USERNAME = "Aliconfigs"
-BUY_CHANNEL_USERNAME = "SelfPersiangulf"
+SUPPORT_USERNAME = "YourSupportUsername"
+BUY_CHANNEL_USERNAME = "YourChannelUsername"
 HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
 
 os.makedirs("sessions", exist_ok=True)
 
 # لیست کانال ها کم یا زیاد میتونید کنید بدون @
 FORCE_CHANNELS = [
-    "SH0PAL1",
+    "00000",
+    "00000",
+    "00000"
 ]
 
 
@@ -881,8 +883,7 @@ async def admin_panel(client, message: Message):
          InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
         [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
         [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
-        , [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="admin_bet_photo", style=KeyboardButtonStyle(bg_primary=True))],
-         [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="admin_bet_photo", style=KeyboardButtonStyle(bg_primary=True))]
+        , [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="admin_bet_photo", style=KeyboardButtonStyle(bg_primary=True))]
     ])
     
     await message.reply_text(stats_text, reply_markup=keyboard)
