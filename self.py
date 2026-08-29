@@ -36,6 +36,7 @@ FORCE_CHANNELS = [
     "SH0PAL1",
 ]
 
+
 COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
 TOMAN_PER_COIN = 50000 / 1440
 card_info = {
@@ -748,21 +749,7 @@ async def group_bet_handler(client, message: Message):
         ]
     ])
 
-    # ارسال عکس ذخیره شده از مدیریت عکس (در صورت وجود)
-    bet_image = db.data.get("bet_doz_image")
-    if bet_image:
-        bet_msg = await message.reply_photo(
-            photo=bet_image,
-            caption=bet_text,
-            reply_markup=keyboard,
-            parse_mode=enums.ParseMode.HTML
-        )
-    else:
-        bet_msg = await message.reply_text(
-            bet_text,
-            reply_markup=keyboard,
-            parse_mode=enums.ParseMode.HTML
-        )
+    bet_msg = await message.reply_text(bet_text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
 
     bet_key = f"{chat_id}_{bet_msg.id}"
 
@@ -880,7 +867,6 @@ async def admin_panel(client, message: Message):
          InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
         [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
         [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
-        , [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="admin_bet_photo", style=KeyboardButtonStyle(bg_primary=True))]
     ])
     
     await message.reply_text(stats_text, reply_markup=keyboard)
@@ -1261,7 +1247,6 @@ async def admin_panel(client, message: Message):
          InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
         [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
         [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
-        , [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="admin_bet_photo", style=KeyboardButtonStyle(bg_primary=True))]
     ])
     
     await message.reply_text(stats_text, reply_markup=keyboard)
@@ -1863,7 +1848,7 @@ def _ttt_winner(board):
         if board[a] != " " and board[a] == board[b] == board[c]: return board[a]
     return None
 
-@bot.on_message(filters.group & filters.regex(r'^دوز(?:\s+\d+)?$'))
+@bot.on_message(filters.group & filters.regex(r'^دوز$'))
 async def ttt_create(client, message: Message):
     gid = f"{message.chat.id}_{message.id}"
     game={"chat_id":message.chat.id,"creator_id":message.from_user.id,"creator_name":message.from_user.first_name or "کاربر","player2_id":None,"board":[" "]*9,"turn":None,"message_id":None,"finished":False}
@@ -1873,11 +1858,7 @@ async def ttt_create(client, message: Message):
           "⏳ منتظر یک بازیکن دیگر...\\n\\n"
           "بازیکن اول: ❌ | بازیکن دوم: ⭕")
     kb=InlineKeyboardMarkup([[InlineKeyboardButton("🎮 پیوستن به بازی",callback_data=f"ttt_join_{gid}",style=KeyboardButtonStyle(bg_success=True))]])
-    image = db.data.get("bet_doz_image")
-    if image:
-        m=await message.reply_photo(photo=image, caption=text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
-    else:
-        m=await message.reply_text(text,reply_markup=kb,parse_mode=enums.ParseMode.HTML)
+    m=await message.reply_text(text,reply_markup=kb,parse_mode=enums.ParseMode.HTML)
     game["message_id"]=m.id; db.set("tic_tac_toe",gid,game)
 
 async def handle_ttt_callback(client, q):
@@ -2309,6 +2290,38 @@ async def handle_card_photo(client, message: Message):
             
         except Exception as e:
             await message.reply_text("❌ خطا در ارسال به ادمین. لطفا بعدا تلاش کنید.")
+
+
+# ===== مدیریت عکس شرط و دوز با دستور =====
+waiting_setimage = set()
+
+@bot.on_message(filters.command("setimage") & filters.user(ADMIN_ID))
+async def setimage_command(client, message: Message):
+    waiting_setimage.add(message.from_user.id)
+    await message.reply_text("🖼 لطفاً عکس شرط و دوز را ارسال کنید.")
+
+@bot.on_message(filters.command("removeimage") & filters.user(ADMIN_ID))
+async def removeimage_command(client, message: Message):
+    try:
+        db.delete("settings", "bet_doz_image")
+    except Exception:
+        try:
+            db.data.get("settings", {}).pop("bet_doz_image", None)
+            if hasattr(db, "save"):
+                db.save()
+        except Exception:
+            pass
+    await message.reply_text("✅ عکس شرط و دوز حذف شد.")
+
+@bot.on_message(filters.photo & filters.user(ADMIN_ID))
+async def save_setimage_photo(client, message: Message):
+    if message.from_user.id not in waiting_setimage:
+        return
+    file_id = message.photo.file_id
+    db.set("settings", "bet_doz_image", file_id)
+    waiting_setimage.discard(message.from_user.id)
+    await message.reply_text("✅ عکس شرط و دوز با موفقیت ذخیره شد.")
+
 def main():
     print("● ربات سلف ساز روشن شد ●")
     try: 
@@ -2320,48 +2333,6 @@ def main():
     finally: 
         stop_all_selfbots()
         print("✅ ربات متوقف شد")
-
-
-# ===== مدیریت عکس شرط و دوز =====
-admin_photo_wait = set()
-
-@bot.on_callback_query(filters.regex("^admin_bet_photo$"))
-async def admin_bet_photo_menu(client, callback_query):
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")],
-        [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
-    ])
-    await callback_query.message.edit_text(
-        "🖼 مدیریت عکس شرط و دوز\n\n" +
-        ("عکس ذخیره شده: ✅ فعال" if db.data.get("bet_doz_image") else "عکس ذخیره شده: ❌ ندارد"),
-        reply_markup=kb
-    )
-    await callback_query.answer()
-
-@bot.on_callback_query(filters.regex("^set_bet_photo$"))
-async def set_bet_photo(client, callback_query):
-    admin_photo_wait.add(callback_query.from_user.id)
-    await callback_query.message.reply_text("📤 عکس جدید را ارسال کنید.")
-    await callback_query.answer()
-
-@bot.on_callback_query(filters.regex("^del_bet_photo$"))
-async def del_bet_photo(client, callback_query):
-    db.data.pop("bet_doz_image", None)
-    if hasattr(db, "save"):
-        db.save()
-    await callback_query.message.reply_text("✅ عکس حذف شد.")
-    await callback_query.answer()
-
-@bot.on_message(filters.photo)
-async def save_bet_photo(client, message):
-    if message.from_user.id not in admin_photo_wait:
-        return
-    admin_photo_wait.discard(message.from_user.id)
-    db.data["bet_doz_image"] = message.photo.file_id
-    if hasattr(db, "save"):
-        db.save()
-    await message.reply_text("✅ عکس شرط و دوز ذخیره شد.")
 
 if __name__ == "__main__":
     main()
