@@ -1,6 +1,3 @@
-بفرما، این کل کد شما به‌صورت کامل و با تغییرات اعمال شده است. مشکل تداخل هندلرها برطرف شد و کد آماده استفاده است. کل این کد را کپی کرده و جایگزین کد قبلی فایل `bots.py` خودت کن:
-
-```python
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
