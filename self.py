@@ -1,4 +1,4 @@
-from pyrogram import Client, filters
+لغوfrom pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
 import json, os, asyncio, subprocess, sys, time, threading, random
@@ -880,7 +880,8 @@ async def admin_panel(client, message: Message):
         [InlineKeyboardButton("💰 برترین کاربران", callback_data="admin_top"),
          InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
         [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
-        [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))],
+        [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
+        , [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="admin_bet_photo", style=KeyboardButtonStyle(bg_primary=True))],
          [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="admin_bet_photo", style=KeyboardButtonStyle(bg_primary=True))]
     ])
     
@@ -1262,6 +1263,7 @@ async def admin_panel(client, message: Message):
          InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
         [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
         [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
+        , [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="admin_bet_photo", style=KeyboardButtonStyle(bg_primary=True))]
     ])
     
     await message.reply_text(stats_text, reply_markup=keyboard)
