@@ -1,4 +1,4 @@
-from pyrogram import Client, filters
+لغوfrom pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
 import json, os, asyncio, subprocess, sys, time, threading, random
@@ -35,7 +35,6 @@ os.makedirs("sessions", exist_ok=True)
 FORCE_CHANNELS = [
     "SH0PAL1",
 ]
-
 
 COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
 TOMAN_PER_COIN = 50000 / 1440
@@ -2141,6 +2140,31 @@ async def handle_phone(client, message: Message):
                 del active_clients[user_id]
             except:
                 pass
+# ===== مدیریت عکس شرط و دوز با دستور =====
+waiting_setimage = set()
+
+@bot.on_message(filters.command("setimage") & filters.user(ADMIN_ID))
+async def setimage_command(client, message: Message):
+    print("SETIMAGE RUN:", message.from_user.id)
+    waiting_setimage.add(message.from_user.id)
+    await message.reply_text("🖼 لطفاً عکس شرط و دوز را ارسال کنید.")
+
+@bot.on_message(filters.command("removeimage") & filters.user(ADMIN_ID))
+async def removeimage_command(client, message: Message):
+    try:
+        db.delete("settings", "bet_doz_image")
+    except Exception:
+        pass
+    await message.reply_text("✅ عکس شرط و دوز حذف شد.")
+
+@bot.on_message(filters.photo & filters.user(ADMIN_ID))
+async def save_setimage_photo(client, message: Message):
+    if message.from_user.id not in waiting_setimage:
+        return
+    db.set("settings", "bet_doz_image", message.photo.file_id)
+    waiting_setimage.discard(message.from_user.id)
+    await message.reply_text("✅ عکس شرط و دوز با موفقیت ذخیره شد.")
+
 @bot.on_message(filters.private & filters.text)
 async def handle_all_messages(client, message: Message):
     user_id = message.from_user.id
@@ -2291,36 +2315,6 @@ async def handle_card_photo(client, message: Message):
         except Exception as e:
             await message.reply_text("❌ خطا در ارسال به ادمین. لطفا بعدا تلاش کنید.")
 
-
-# ===== مدیریت عکس شرط و دوز با دستور =====
-waiting_setimage = set()
-
-@bot.on_message(filters.command("setimage") & filters.user(ADMIN_ID))
-async def setimage_command(client, message: Message):
-    waiting_setimage.add(message.from_user.id)
-    await message.reply_text("🖼 لطفاً عکس شرط و دوز را ارسال کنید.")
-
-@bot.on_message(filters.command("removeimage") & filters.user(ADMIN_ID))
-async def removeimage_command(client, message: Message):
-    try:
-        db.delete("settings", "bet_doz_image")
-    except Exception:
-        try:
-            db.data.get("settings", {}).pop("bet_doz_image", None)
-            if hasattr(db, "save"):
-                db.save()
-        except Exception:
-            pass
-    await message.reply_text("✅ عکس شرط و دوز حذف شد.")
-
-@bot.on_message(filters.photo & filters.user(ADMIN_ID))
-async def save_setimage_photo(client, message: Message):
-    if message.from_user.id not in waiting_setimage:
-        return
-    file_id = message.photo.file_id
-    db.set("settings", "bet_doz_image", file_id)
-    waiting_setimage.discard(message.from_user.id)
-    await message.reply_text("✅ عکس شرط و دوز با موفقیت ذخیره شد.")
 
 def main():
     print("● ربات سلف ساز روشن شد ●")
