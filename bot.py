@@ -18,22 +18,24 @@ async def safe_edit_message(message, *args, **kwargs):
 
 user_temp_codes = {}
 active_clients = {}
-BOT_TOKEN = "8876742932:AAHkfGQMsNEDH_bSQemz5p4NLdMtJOTOiTM"
-API_ID = 35656061
-API_HASH = "b37f2596516bc0439bf505d1d230395c"
-ADMIN_ID = 7845464086
+BOT_TOKEN = "00000"
+API_ID = 00000
+API_HASH = "00000"
+ADMIN_ID = 000000
 
 # تنظیمات منوی جدید
 # یوزرنیم‌ها را بدون @ وارد کنید
-SUPPORT_USERNAME = "Aliconfigs"
-BUY_CHANNEL_USERNAME = "SelfPersiangulf"
+SUPPORT_USERNAME = "YourSupportUsername"
+BUY_CHANNEL_USERNAME = "YourChannelUsername"
 HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
 
 os.makedirs("sessions", exist_ok=True)
 
 # لیست کانال ها کم یا زیاد میتونید کنید بدون @
 FORCE_CHANNELS = [
-    "SH0PAL1",
+    "00000",
+    "00000",
+    "00000"
 ]
 
 
@@ -749,7 +751,21 @@ async def group_bet_handler(client, message: Message):
         ]
     ])
 
-    bet_msg = await message.reply_text(bet_text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
+    # ارسال عکس ذخیره شده از مدیریت عکس (در صورت وجود)
+    bet_image = db.data.get("bet_doz_image")
+    if bet_image:
+        bet_msg = await message.reply_photo(
+            photo=bet_image,
+            caption=bet_text,
+            reply_markup=keyboard,
+            parse_mode=enums.ParseMode.HTML
+        )
+    else:
+        bet_msg = await message.reply_text(
+            bet_text,
+            reply_markup=keyboard,
+            parse_mode=enums.ParseMode.HTML
+        )
 
     bet_key = f"{chat_id}_{bet_msg.id}"
 
@@ -835,32 +851,26 @@ async def user_info(client, message: Message):
 
 @bot.on_message(filters.command("admin") & filters.user(ADMIN_ID))
 async def admin_panel(client, message: Message):
+    """پنل مدیریت اصلی؛ دکمه مدیریت عکس شرط و دوز همیشه در همین پنل نمایش داده می‌شود."""
     users = db.data.get("users", {})
     active_count = len(db.data.get("processes", {}))
     total_credits = sum(db.data.get("credits", {}).values())
     pending_payments = len(db.get_pending_payments())
-    
     today = time.time() - 86400
-    new_today = sum(1 for user_data in users.values() if user_data.get('created_at', 0) > today)
-    
-    stats_text = f"""
-🛠 **پنل مدیریت ادمین**
+    new_today = sum(1 for user_data in users.values() if user_data.get("created_at", 0) > today)
 
-👥 **کل کاربران:** `{len(users)}`
-🟢 **کاربران فعال:** `{active_count}`
-🆕 **کاربران امروز:** `{new_today}`
-💰 **مجموع سکه ها:** `{total_credits}`
+    stats_text = (
+        "🛠 **پنل مدیریت ادمین**\n\n"
+        f"👥 **کل کاربران:** `{len(users)}`\n"
+        f"🟢 **کاربران فعال:** `{active_count}`\n"
+        f"🆕 **کاربران امروز:** `{new_today}`\n"
+        f"💰 **مجموع سکه ها:** `{total_credits}`\n\n"
+        f"📋 **درخواست‌های در انتظار:**\n└─ 💰 پرداخت: `{pending_payments}`\n"
+    )
 
-📋 **درخواست‌های در انتظار:**
-└─ 💰 پرداخت: `{pending_payments}`
-
-**📋 دستورات سریع:**
-`/set آیدی تعداد` - تنظیم سکه
-`/user آیدی` - اطلاعات کاربر
-`/admin` - این پنل
-"""
-    
+    # مهم: این دکمه مستقیماً در کیبورد اصلی /admin است.
     keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="ADMIN_PHOTO_PANEL", style=KeyboardButtonStyle(bg_primary=True))],
         [InlineKeyboardButton("👥 لیست کاربران", callback_data="admin_list"),
          InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
         [InlineKeyboardButton("💰 برترین کاربران", callback_data="admin_top"),
@@ -868,7 +878,6 @@ async def admin_panel(client, message: Message):
         [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
         [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
     ])
-    
     await message.reply_text(stats_text, reply_markup=keyboard)
 
 @bot.on_callback_query(filters.regex(r'^code_'))
@@ -1060,6 +1069,45 @@ async def admin_callback_handler(client, callback_query):
         await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
         await callback_query.answer()
     
+    # ====== مدیریت عکس شرط و دوز ======
+    elif data == "admin_photo_manager":
+        if user_id != ADMIN_ID:
+            await callback_query.answer("⛔ دسترسی ندارید.", show_alert=True)
+            return
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")],
+            [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")],
+            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_back")]
+        ])
+        status = "عکس ذخیره شده: ✅ فعال" if db.data.get("bet_doz_image") else "عکس ذخیره شده: ❌ ندارد"
+        await safe_edit_message(callback_query.message, f"🖼 **مدیریت عکس شرط و دوز**\n\n{status}", reply_markup=kb)
+        await callback_query.answer()
+
+    elif data == "set_bet_photo":
+        if user_id != ADMIN_ID:
+            await callback_query.answer("⛔ دسترسی ندارید.", show_alert=True)
+            return
+        admin_photo_wait.add(user_id)
+        await callback_query.answer("✅ حالا عکس را ارسال کنید.")
+        await client.send_message(user_id, "📤 **عکس جدید شرط و دوز را ارسال کنید.**")
+
+    elif data == "del_bet_photo":
+        if user_id != ADMIN_ID:
+            await callback_query.answer("⛔ دسترسی ندارید.", show_alert=True)
+            return
+        db.data.pop("bet_doz_image", None)
+        ok = db.save_data()
+        if ok:
+            await callback_query.answer("✅ عکس حذف شد.", show_alert=True)
+        else:
+            await callback_query.answer("❌ ذخیره تغییرات ناموفق بود.", show_alert=True)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")],
+            [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")],
+            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_back")]
+        ])
+        await safe_edit_message(callback_query.message, "🖼 **مدیریت عکس شرط و دوز**\n\nعکس ذخیره شده: ❌ ندارد", reply_markup=kb)
+
     # ====== سکه همگانی ======
     elif data == "admin_global_coins":
         db.set("temp_data", f"admin_global_coins_{user_id}", True)
@@ -1213,43 +1261,6 @@ async def user_info(client, message: Message):
     except: 
         await message.reply_text("❌ آیدی باید عدد باشد")
 
-@bot.on_message(filters.command("admin") & filters.user(ADMIN_ID))
-async def admin_panel(client, message: Message):
-    users = db.data.get("users", {})
-    active_count = len(db.data.get("processes", {}))
-    total_credits = sum(db.data.get("credits", {}).values())
-    pending_payments = len(db.get_pending_payments())
-    
-    today = time.time() - 86400
-    new_today = sum(1 for user_data in users.values() if user_data.get('created_at', 0) > today)
-    
-    stats_text = f"""
-🛠 **پنل مدیریت ادمین**
-
-👥 **کل کاربران:** `{len(users)}`
-🟢 **کاربران فعال:** `{active_count}`
-🆕 **کاربران امروز:** `{new_today}`
-💰 **مجموع سکه ها:** `{total_credits}`
-
-📋 **درخواست‌های در انتظار:**
-└─ 💰 پرداخت: `{pending_payments}`
-
-**📋 دستورات سریع:**
-`/set آیدی تعداد` - تنظیم سکه
-`/user آیدی` - اطلاعات کاربر
-`/admin` - این پنل
-"""
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👥 لیست کاربران", callback_data="admin_list"),
-         InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
-        [InlineKeyboardButton("💰 برترین کاربران", callback_data="admin_top"),
-         InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
-        [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
-        [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
-    ])
-    
-    await message.reply_text(stats_text, reply_markup=keyboard)
 def create_main_menu(user_id):
     """منوی اصلی: دقیقاً ۶ بخش عمودی؛ ردیف‌های ۱،۳،۵،۶ تمام‌عرض و ردیف‌های ۲،۴ دو ستونه."""
     # این فاصله‌های یونی‌کد فقط برای بزرگ‌تر و یکدست‌تر دیده شدن متن دکمه‌هاست.
@@ -1365,6 +1376,56 @@ async def show_main_menu(client, chat_id, user):
 {MENU_WIDTH_PAD}"""
 
     await client.send_message(chat_id, welcome_text, reply_markup=keyboard)
+
+@bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_PANEL$"))
+async def admin_photo_panel_handler(client, callback_query):
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
+        return
+    status = "✅ فعال" if db.data.get("bet_doz_image") else "❌ ندارد"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")],
+        [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")],
+        [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]
+    ])
+    await callback_query.message.edit_text(
+        f"🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: {status}",
+        reply_markup=kb
+    )
+    await callback_query.answer()
+
+@bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_SET$"))
+async def admin_photo_set_handler(client, callback_query):
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
+        return
+    admin_photo_wait.add(ADMIN_ID)
+    await callback_query.answer("✅ عکس را در همین چت ارسال کنید.", show_alert=True)
+
+@bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_DELETE$"))
+async def admin_photo_delete_handler(client, callback_query):
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
+        return
+    db.data.pop("bet_doz_image", None)
+    ok = db.save_data()
+    await callback_query.answer("✅ عکس حذف شد." if ok else "❌ خطا در ذخیره دیتابیس.", show_alert=True)
+    await callback_query.message.edit_text(
+        "🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: ❌ ندارد",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")],
+            [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")],
+            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]
+        ])
+    )
+
+@bot.on_callback_query(filters.regex(r"^ADMIN_PANEL_BACK$"))
+async def admin_panel_back_handler(client, callback_query):
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
+        return
+    await admin_panel(client, callback_query.message)
+    await callback_query.answer()
 
 @bot.on_callback_query()
 async def callback_handler(client, callback_query):
@@ -1848,7 +1909,7 @@ def _ttt_winner(board):
         if board[a] != " " and board[a] == board[b] == board[c]: return board[a]
     return None
 
-@bot.on_message(filters.group & filters.regex(r'^دوز$'))
+@bot.on_message(filters.group & filters.regex(r'^دوز(?:\s+\d+)?$'))
 async def ttt_create(client, message: Message):
     gid = f"{message.chat.id}_{message.id}"
     game={"chat_id":message.chat.id,"creator_id":message.from_user.id,"creator_name":message.from_user.first_name or "کاربر","player2_id":None,"board":[" "]*9,"turn":None,"message_id":None,"finished":False}
@@ -1858,7 +1919,11 @@ async def ttt_create(client, message: Message):
           "⏳ منتظر یک بازیکن دیگر...\\n\\n"
           "بازیکن اول: ❌ | بازیکن دوم: ⭕")
     kb=InlineKeyboardMarkup([[InlineKeyboardButton("🎮 پیوستن به بازی",callback_data=f"ttt_join_{gid}",style=KeyboardButtonStyle(bg_success=True))]])
-    m=await message.reply_text(text,reply_markup=kb,parse_mode=enums.ParseMode.HTML)
+    image = db.data.get("bet_doz_image")
+    if image:
+        m=await message.reply_photo(photo=image, caption=text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
+    else:
+        m=await message.reply_text(text,reply_markup=kb,parse_mode=enums.ParseMode.HTML)
     game["message_id"]=m.id; db.set("tic_tac_toe",gid,game)
 
 async def handle_ttt_callback(client, q):
@@ -2292,6 +2357,7 @@ async def handle_card_photo(client, message: Message):
             await message.reply_text("❌ خطا در ارسال به ادمین. لطفا بعدا تلاش کنید.")
 def main():
     print("● ربات سلف ساز روشن شد ●")
+    print("✅ ADMIN PHOTO PANEL: ENABLED")
     try: 
         bot.run()
     except KeyboardInterrupt: 
@@ -2301,6 +2367,29 @@ def main():
     finally: 
         stop_all_selfbots()
         print("✅ ربات متوقف شد")
+
+
+# ===== مدیریت عکس شرط و دوز =====
+admin_photo_wait = set()
+
+def save_bet_doz_image(file_id):
+    db.data["bet_doz_image"] = file_id
+    return db.save_data()
+
+def delete_bet_doz_image():
+    db.data.pop("bet_doz_image", None)
+    return db.save_data()
+
+@bot.on_message(filters.photo & filters.user(ADMIN_ID))
+async def save_bet_photo(client, message: Message):
+    if message.from_user.id not in admin_photo_wait:
+        return
+    admin_photo_wait.discard(message.from_user.id)
+    ok = save_bet_doz_image(message.photo.file_id)
+    if ok:
+        await message.reply_text("✅ **عکس شرط و دوز با موفقیت ذخیره شد.**\nاز این به بعد عکس در شرط و بازی دوز استفاده می‌شود.")
+    else:
+        await message.reply_text("❌ ذخیره عکس در دیتابیس ناموفق بود.")
 
 if __name__ == "__main__":
     main()
