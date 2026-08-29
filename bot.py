@@ -26,7 +26,7 @@ ADMIN_ID = 7845464086
 # تنظیمات منوی جدید
 # یوزرنیم‌ها را بدون @ وارد کنید
 SUPPORT_USERNAME = "Aliconfigs"
-BUY_CHANNEL_USERNAME = "SH0PAL1"
+BUY_CHANNEL_USERNAME = "SelfPersiangulf"
 HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
 
 os.makedirs("sessions", exist_ok=True)
@@ -1317,11 +1317,6 @@ async def callback_handler(client, callback_query):
     user_id = callback_query.from_user.id
     data = callback_query.data
 
-    # این ربات فقط برای استفاده شخصی مالک تنظیم شده است.
-    if user_id != ADMIN_ID:
-        await callback_query.answer("❌ این ربات فقط برای استفاده شخصی مالک فعال است.", show_alert=True)
-        return
-
     # ==============================
     # زیرمجموعه
     # ==============================
@@ -1707,30 +1702,26 @@ async def callback_handler(client, callback_query):
         await callback_query.answer("✅ لطفا تعداد سکه مورد نظر را وارد کنید")
 
     elif data == "back":
-        if user_id != ADMIN_ID:
-            credits = db.get("credits", user_id, 0)
-            user_data = db.get("users", user_id, {})
-            
-            status_text = "🔴 سلف غیرفعال"
-            phone_text = ""
-            
-            if user_data and user_data.get('status') == 'active':
-                status_text = f"🟢 سلف فعال"
-                phone_text = f"\n📱 شماره: {user_data.get('phone', '')}"
-            
-            keyboard = create_main_menu(user_id)
-            
-            text = (
-                f"🤖 **ربات مدیریت سلف بات**\n\n"
-                f"**وضعیت:** {status_text}{phone_text}\n"
-                f"**💰 سکه ها:** `{credits}` سکه\n"
-                f"**⏰ مصرف:** 1 سکه در ساعت\n"
-                f"{MENU_WIDTH_PAD}"
-            )
-            
-            await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
-        else:
-            await admin_panel(client, callback_query.message)
+        # بازگشت برای همه کاربران، از جمله ادمین، به منوی اصلی عادی انجام می‌شود.
+        credits = db.get("credits", user_id, 0)
+        user_data = db.get("users", user_id, {})
+        
+        status_text = "🔴 سلف غیرفعال"
+        phone_text = ""
+        
+        if user_data and user_data.get('status') == 'active':
+            status_text = "🟢 سلف فعال"
+            phone_text = f"\n📱 شماره: {user_data.get('phone', '')}"
+        
+        keyboard = create_main_menu(user_id)
+        text = (
+            f"🤖 **ربات مدیریت سلف بات**\n\n"
+            f"**وضعیت:** {status_text}{phone_text}\n"
+            f"**💰 سکه ها:** `{credits}` سکه\n"
+            f"**⏰ مصرف:** 1 سکه در ساعت\n"
+            f"{MENU_WIDTH_PAD}"
+        )
+        await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
         await callback_query.answer()
     
     elif data == "check_join":
@@ -1769,11 +1760,8 @@ async def handle_admin_input(client, message: Message):
         except: pass
 @bot.on_message(filters.command("start"))
 async def start_handler(client, message: Message):
-    # ربات برای استفاده شخصی مالک است، اما کاربران غیرمجاز باید پاسخ واضح بگیرند.
-    if message.from_user.id != ADMIN_ID:
-        await message.reply_text("🔒 این ربات فقط برای استفاده شخصی مالک فعال است.")
-        return
-
+    # همه کاربران می‌توانند ربات را با /start استفاده کنند.
+    # فقط امکانات مدیریتی همچنان مخصوص ADMIN_ID باقی می‌ماند.
     ok, not_joined = await check_force_join(client, message.from_user.id)
     if not ok:
         buttons = []
@@ -1967,7 +1955,7 @@ async def check_join(client, callback_query):
         "❌ هنوز عضو همه کانال‌ها نیستید!",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
-@bot.on_message(filters.private & filters.user(ADMIN_ID) & filters.regex(r'^\+\d{10,15}$'))
+@bot.on_message(filters.private & filters.regex(r'^\+\d{10,15}$'))
 async def handle_phone(client, message: Message):
     user_id, phone = message.from_user.id, message.text
     
@@ -2016,7 +2004,7 @@ async def handle_phone(client, message: Message):
                 del active_clients[user_id]
             except:
                 pass
-@bot.on_message(filters.private & filters.user(ADMIN_ID) & filters.text)
+@bot.on_message(filters.private & filters.text)
 async def handle_all_messages(client, message: Message):
     user_id = message.from_user.id
     text = message.text
@@ -2119,7 +2107,7 @@ async def handle_all_messages(client, message: Message):
             return
     
     pass
-@bot.on_message(filters.photo & filters.private & filters.user(ADMIN_ID))
+@bot.on_message(filters.photo & filters.private)
 async def handle_card_photo(client, message: Message):
     user_id = message.from_user.id
     
