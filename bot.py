@@ -26,7 +26,7 @@ ADMIN_ID = 7845464086
 # تنظیمات منوی جدید
 # یوزرنیم‌ها را بدون @ وارد کنید
 SUPPORT_USERNAME = "Aliconfigs"
-BUY_CHANNEL_USERNAME = "SelfPersiangulf"
+BUY_CHANNEL_USERNAME = "SH0PAL1"
 HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
 
 os.makedirs("sessions", exist_ok=True)
@@ -34,7 +34,6 @@ os.makedirs("sessions", exist_ok=True)
 # لیست کانال ها کم یا زیاد میتونید کنید بدون @
 FORCE_CHANNELS = [
     "SH0PAL1",
-    
 ]
 
 
@@ -1289,10 +1288,8 @@ async def show_main_menu(client, chat_id, user):
         db.set("credits", user_id, 5)
         credits = 5
 
-    if user_id == ADMIN_ID:
-        await client.send_message(chat_id, "🔐 پنل مدیریت ادمین فعال است.")
-        return
-
+    # ادمین هم باید بتواند ربات را مثل یک کاربر عادی استفاده کند.
+    # پنل مدیریت فقط با دستور /admin باز می‌شود.
     user_data = db.get("users", user_id, {})
     status = "🟢 فعال" if user_data.get('status') == 'active' else "🔴 غیرفعال"
     phone = user_data.get('phone', '')
@@ -1770,8 +1767,13 @@ async def handle_admin_input(client, message: Message):
         try:
             await bot.send_message(set_target, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
         except: pass
-@bot.on_message(filters.command("start") & filters.user(ADMIN_ID))
+@bot.on_message(filters.command("start"))
 async def start_handler(client, message: Message):
+    # ربات برای استفاده شخصی مالک است، اما کاربران غیرمجاز باید پاسخ واضح بگیرند.
+    if message.from_user.id != ADMIN_ID:
+        await message.reply_text("🔒 این ربات فقط برای استفاده شخصی مالک فعال است.")
+        return
+
     ok, not_joined = await check_force_join(client, message.from_user.id)
     if not ok:
         buttons = []
@@ -1784,10 +1786,7 @@ async def start_handler(client, message: Message):
         )
         return
 
-    if message.from_user.id == ADMIN_ID:
-        await admin_panel(client, message)
-        return
-
+    # /start همیشه منوی اصلی را باز می‌کند؛ پنل مدیریت فقط با /admin در دسترس است.
     await show_main_menu(client, message.chat.id, message.from_user)
 @bot.on_callback_query(filters.regex(r'^joinbet_(-?\d+)_(-?\d+)$'))
 async def join_group_bet_handler(client, callback_query):
