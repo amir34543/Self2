@@ -1,7 +1,7 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
-import json, os, asyncio, subprocess, sys, time, threading
+import json, os, asyncio, subprocess, sys, time, threading, random
 import html
 from pyrogram import enums
 
@@ -396,12 +396,15 @@ async def finish_group_bet(client, bet_key):
         p_name = html.escape(p.get('name', 'کاربر'))
         player_mentions.append(f'<a href="tg://user?id={p["id"]}"><b>{p_name}</b></a>')
     
-    pot = (1 + len(participants)) * amount 
+    gross_pot = (1 + len(participants)) * amount
+    tax = int(gross_pot * 0.06)  # مالیات ۶٪ از مجموع شرط
+    pot = gross_pot - tax
 
-    import random
     winner_index = random.choice(range(len(players)))
     winner_id = player_ids[winner_index]
     winner_mention = player_mentions[winner_index]
+    loser_index = 1 - winner_index if len(players) == 2 else None
+    loser = players[loser_index] if loser_index is not None else None
     winner_credits = db.get("credits", winner_id, 0) + pot
     db.set("credits", winner_id, winner_credits)
 
@@ -412,15 +415,16 @@ async def finish_group_bet(client, bet_key):
     bet_data["pot"] = pot
     db.set("group_bets", bet_key, bet_data)
 
-    players_text = "\n".join([f"• {mention}" for mention in player_mentions])
-
+    loser_name = html.escape(loser.get("name", "کاربر")) if loser else "-"
+    loser_id = loser.get("id", "-") if loser else "-"
     result_text = (
-        "🎉 **نتیجه شرط 1v1**\n\n"
-        f"💰 مبلغ هر نفر: <code>{amount}</code> سکه\n"
-        f"👥 تعداد بازیکنان: <code>{len(players)}</code> نفر\n"
-        f"📋 فهرست بازیکنان:\n{players_text}\n\n"
-        f"🏆 **برنده:** {winner_mention}\n"
-        f"💎 **جایزه:** <b>{pot}</b> سکه"
+        "<b>◈ ━━━ selfisaz PersianGulf ━━━ ◈</b>\n"
+        "<b>𝐕𝐈𝐏</b> | <b>نتیجه شرطبندی :</b>\n"
+        f"<b>𝐕𝐈𝐏</b> | <b>برنده :</b> {html.escape(players[winner_index].get('name','کاربر'))} (<code>{winner_id}</code>)\n"
+        f"<b>𝐕𝐈𝐏</b> | <b>بازنده :</b> {loser_name} (<code>{loser_id}</code>)\n"
+        f"<b>𝐕𝐈𝐏</b> | <b>جایزه:</b> {pot:,} الماس\n"
+        f"<b>𝐕𝐈𝐏</b> | <b>مالیات:</b> {tax:,} الماس\n"
+        "◈ ━━━ <b>selfisaz PersianGulf</b> ━━━ ◈"
     )
 
     try:
@@ -646,11 +650,17 @@ async def transfer_diamonds_handler(client, message: Message):
     if sender_balance < amount:
         await message.reply_text(f"❌ موجودی الماس شما کافی نیست.\n\n💰 موجودی فعلی: {sender_balance:,} الماس")
         return
-    fee = (amount * 12 + 99) // 100
+    # کارمزد پویا: انتقال‌های کوچک حتی می‌توانند بدون کارمزد باشند.
+    if amount <= 5:
+        fee_percent = random.choice([0, 0, 0, 1])
+    elif amount <= 50:
+        fee_percent = random.randint(0, 8)
+    elif amount <= 500:
+        fee_percent = random.randint(7, 12)
+    else:
+        fee_percent = random.randint(8, 15)
+    fee = int(amount * fee_percent / 100)
     received_amount = amount - fee
-    if received_amount <= 0:
-        await message.reply_text("❌ مبلغ انتقال برای کسر کارمزد کافی نیست.")
-        return
     db.set("credits", sender_id, sender_balance - amount)
     recipient_balance = db.get("credits", recipient_id, 0) + received_amount
     db.set("credits", recipient_id, recipient_balance)
@@ -662,51 +672,24 @@ async def transfer_diamonds_handler(client, message: Message):
         f"👤 <b>فرستنده:</b> {sender_display}\n"
         f"👤 <b>گیرنده:</b> {recipient_display}\n"
         f"💎 <b>مقدار دریافتی:</b> {received_amount:,} الماس\n"
-        f"💵 <b>کارمزد (12٪):</b> {fee:,} الماس\n"
+        f"💵 <b>کارمزد ({fee_percent}٪):</b> {fee:,} الماس\n"
         "◈ ━━━ Persiangulf self ━━━ ◈\n"
         f"💰 <b>موجودی گیرنده:</b> {recipient_balance:,} الماس"
     )
     await message.reply_text(transfer_text, parse_mode=enums.ParseMode.HTML)
 
-@bot.on_message(filters.group & filters.user(ADMIN_ID) & filters.regex(r'^موجودی$'))
+@bot.on_message(filters.group & filters.regex(r'^موجودی$'))
 async def group_balance_simple(client, message: Message):
     user_id = message.from_user.id
-    ok, not_joined = await check_force_join(client, user_id)
-    if not ok:
-        buttons = []
-        for ch in FORCE_CHANNELS:
-            buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
-        buttons.append([InlineKeyboardButton("🔁 بررسی مجدد", callback_data="check_join")])
-        
-        await message.reply_text(
-            "⚠️ **برای مشاهده موجودی باید در کانال‌های زیر عضو باشید:**\n\n" +
-            "\n".join([f"• @{channel}" for channel in FORCE_CHANNELS]),
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-        return
     credits = db.get("credits", user_id, 0)
     toman_value = int(credits * TOMAN_PER_COIN)
-    user_first_name = html.escape(message.from_user.first_name or "کاربر")
-    user_mention = f'<a href="tg://user?id={user_id}"><b>{user_first_name}</b></a>'
-    balance_text = f"""
-💎 <b>موجودی {user_mention}</b> 💎
+    text = "◈ ━━━ persiangulf self ━━━ ◈\n💰 <b>موجودی شما:</b>"
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"💎 {credits:,} الماس", callback_data="balance_noop", style=KeyboardButtonStyle(bg_primary=True))],
+        [InlineKeyboardButton(f"💵 معادل {toman_value:,} تومان", callback_data="balance_noop", style=KeyboardButtonStyle(bg_success=True))]
+    ])
+    await message.reply_text(text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
 
-<b>━━━━━━━━━━━━━━━━━━</b>
-
-💰 <b>موجودی سکه‌ها:</b>
-└─ <code>{credits:,}</code> سکه
-
-💵 <b>ارزش تومانی:</b>
-└─ <code>{toman_value:,}</code> تومان
-
-<b>━━━━━━━━━━━━━━━━━━</b>
-
-"""
-    
-    await message.reply_text(
-        balance_text,
-        parse_mode=enums.ParseMode.HTML
-    )
 @bot.on_message(filters.command("set") & filters.user(ADMIN_ID))
 async def set_credits(client, message: Message):
     if len(message.command) != 3:
@@ -727,7 +710,7 @@ async def set_credits(client, message: Message):
         
     except: 
         await message.reply_text("❌ آیدی/تعداد باید عدد باشد")
-@bot.on_message(filters.group & filters.user(ADMIN_ID) & filters.regex(r'^شرطبندی\s+(\d+)(?:\s*سکه)?$'))
+@bot.on_message(filters.group & filters.regex(r'^شرطبندی\s+(\d+)(?:\s*الماس)?$'))
 async def group_bet_handler(client, message: Message):
     chat_id = message.chat.id
     creator_id = message.from_user.id
@@ -752,18 +735,17 @@ async def group_bet_handler(client, message: Message):
     creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
 
     bet_text = (
-        "🎲 شرطبندی درحال اجرا ...\n\n"
-        f"💰 مبلغ هر نفر: <code>{amount}</code> سکه\n"
-        f"👤 سازنده: {creator_mention}\n\n"
-        "برای شرکت در این شرط روی دکمه «پیوستن به شرط» بزنید.\n"
-        "⛔ اگر تا ۵ دقیقه کسی شرکت نکند، شرط لغو و مبلغ به سازنده برمی‌گردد.\n"
-        "⏳ پس از پیوستن نفر دوم، ۵ ثانیه بعد برنده مشخص می‌شود."
+        "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>\n"
+        "<b>𝐕𝐈𝐏</b> | شرطبندی :\n"
+        f"<b>𝐕𝐈𝐏</b> | {amount:,} الماس\n"
+        f"<b>𝐕𝐈𝐏</b> | سازنده: {creator_mention}\n"
+        "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>"
     )
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ پیوستن به شرط", callback_data=f"joinbet_waiting"),
-            InlineKeyboardButton("⛔ لغو شرط", callback_data=f"cancelbet_waiting")
+            InlineKeyboardButton("◈ ━ پیوستن ━ ◈", callback_data=f"joinbet_waiting", style=KeyboardButtonStyle(bg_success=True)),
+            InlineKeyboardButton("❌ لغو", callback_data=f"cancelbet_waiting", style=KeyboardButtonStyle(bg_danger=True))
         ]
     ])
 
@@ -791,8 +773,8 @@ async def group_bet_handler(client, message: Message):
     try:
         new_keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ پیوستن به شرط", callback_data=f"joinbet_{chat_id}_{bet_msg.id}"),
-                InlineKeyboardButton("⛔ لغو شرط", callback_data=f"cancelbet_{chat_id}_{bet_msg.id}")
+                InlineKeyboardButton("◈ ━ پیوستن ━ ◈", callback_data=f"joinbet_{chat_id}_{bet_msg.id}", style=KeyboardButtonStyle(bg_success=True)),
+                InlineKeyboardButton("❌ لغو", callback_data=f"cancelbet_{chat_id}_{bet_msg.id}", style=KeyboardButtonStyle(bg_danger=True))
             ]
         ])
         await bet_msg.edit_reply_markup(new_keyboard)
@@ -883,7 +865,8 @@ async def admin_panel(client, message: Message):
          InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
         [InlineKeyboardButton("💰 برترین کاربران", callback_data="admin_top"),
          InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
-        [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")]
+        [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
+        [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
     ])
     
     await message.reply_text(stats_text, reply_markup=keyboard)
@@ -1077,6 +1060,12 @@ async def admin_callback_handler(client, callback_query):
         await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
         await callback_query.answer()
     
+    # ====== سکه همگانی ======
+    elif data == "admin_global_coins":
+        db.set("temp_data", f"admin_global_coins_{user_id}", True)
+        await safe_edit_message(callback_query.message, "🪙 تعداد الماسی که می‌خواهید به همه کاربران اضافه شود را ارسال کنید:")
+        await callback_query.answer()
+
     # ====== بازگشت به پنل ادمین ======
     elif data == "admin_back":
         await admin_panel(client, callback_query.message)
@@ -1256,7 +1245,8 @@ async def admin_panel(client, message: Message):
          InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
         [InlineKeyboardButton("💰 برترین کاربران", callback_data="admin_top"),
          InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
-        [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")]
+        [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
+        [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
     ])
     
     await message.reply_text(stats_text, reply_markup=keyboard)
@@ -1485,6 +1475,14 @@ async def callback_handler(client, callback_query):
         await callback_query.answer()
         return
     
+    if data == "balance_noop":
+        await callback_query.answer("💎 اطلاعات موجودی شما", show_alert=False)
+        return
+
+    if data.startswith("ttt_join_") or data.startswith("ttt_move_"):
+        await handle_ttt_callback(client, callback_query)
+        return
+
     if data.startswith("joinbet_"):
         if data == "joinbet_waiting":
             await callback_query.answer("⏳ لطفا چند لحظه صبر کنید...", show_alert=True)
@@ -1812,6 +1810,17 @@ async def handle_admin_input(client, message: Message):
     user_id = message.from_user.id
     amount = int(message.text)
     
+    if db.get("temp_data", f"admin_global_coins_{user_id}"):
+        db.delete("temp_data", f"admin_global_coins_{user_id}")
+        users = db.get_all("users")
+        count = 0
+        for uid in users.keys():
+            uid_int = int(uid)
+            db.set("credits", uid_int, db.get("credits", uid_int, 0) + amount)
+            count += 1
+        await message.reply_text(f"✅ به {count} کاربر، هر کدام {amount:,} الماس اضافه شد.")
+        return
+
     set_target = db.get("temp_data", f"admin_set_{user_id}")
     if set_target:
         db.delete("temp_data", f"admin_set_{user_id}")
@@ -1822,6 +1831,70 @@ async def handle_admin_input(client, message: Message):
         try:
             await bot.send_message(set_target, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
         except: pass
+
+# ==============================
+# بازی دوز گروهی (2 نفره)
+# ==============================
+def _ttt_keyboard(game_id, board, enabled=True):
+    cells = []
+    for i, value in enumerate(board):
+        label = value if value in ("❌", "⭕") else "·"
+        cells.append(InlineKeyboardButton(label, callback_data=f"ttt_move_{game_id}_{i}" if enabled and value == " " else "balance_noop"))
+    return InlineKeyboardMarkup([cells[0:3], cells[3:6], cells[6:9]])
+
+def _ttt_winner(board):
+    lines=((0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6))
+    for a,b,c in lines:
+        if board[a] != " " and board[a] == board[b] == board[c]: return board[a]
+    return None
+
+@bot.on_message(filters.group & filters.regex(r'^دوز$'))
+async def ttt_create(client, message: Message):
+    gid = f"{message.chat.id}_{message.id}"
+    game={"chat_id":message.chat.id,"creator_id":message.from_user.id,"creator_name":message.from_user.first_name or "کاربر","player2_id":None,"board":[" "]*9,"turn":None,"message_id":None,"finished":False}
+    db.set("tic_tac_toe", gid, game)
+    text=("🎮 <b>بازی دوز</b>\\n\\n"
+          f"👤 سازنده: <b>{html.escape(message.from_user.first_name or 'کاربر')}</b>\\n"
+          "⏳ منتظر یک بازیکن دیگر...\\n\\n"
+          "بازیکن اول: ❌ | بازیکن دوم: ⭕")
+    kb=InlineKeyboardMarkup([[InlineKeyboardButton("🎮 پیوستن به بازی",callback_data=f"ttt_join_{gid}",style=KeyboardButtonStyle(bg_success=True))]])
+    m=await message.reply_text(text,reply_markup=kb,parse_mode=enums.ParseMode.HTML)
+    game["message_id"]=m.id; db.set("tic_tac_toe",gid,game)
+
+async def handle_ttt_callback(client, q):
+    data=q.data
+    if data.startswith("ttt_join_"):
+        gid=data[len("ttt_join_"):]; g=db.get("tic_tac_toe",gid)
+        if not g or g.get("finished"): await q.answer("بازی در دسترس نیست",show_alert=True); return
+        if q.from_user.id==g["creator_id"]: await q.answer("شما سازنده بازی هستید.",show_alert=True); return
+        if g.get("player2_id"): await q.answer("بازی پر شده است.",show_alert=True); return
+        g["player2_id"]=q.from_user.id; g["player2_name"]=q.from_user.first_name or "کاربر"; g["turn"]=g["creator_id"]; db.set("tic_tac_toe",gid,g)
+        text=("🎮 <b>بازی دوز شروع شد!</b>\\n\\n"
+              f"❌ {html.escape(g['creator_name'])}\\n⭕ {html.escape(g['player2_name'])}\\n\\n"
+              f"نوبت: ❌ {html.escape(g['creator_name'])}")
+        await safe_edit_message(q.message,text,reply_markup=_ttt_keyboard(gid,g["board"]),parse_mode=enums.ParseMode.HTML)
+        await q.answer("به بازی پیوستید!"); return
+    # move format: ttt_move_gid_index ; gid may contain underscores, so rsplit
+    rest=data[len("ttt_move_"):]; gid, idxs=rest.rsplit("_",1); idx=int(idxs); g=db.get("tic_tac_toe",gid)
+    if not g or g.get("finished") or not g.get("player2_id"): await q.answer("بازی فعال نیست.",show_alert=True); return
+    if q.from_user.id!=g["turn"]: await q.answer("نوبت شما نیست!",show_alert=True); return
+    if g["board"][idx] != " ": await q.answer("این خانه پر است.",show_alert=True); return
+    mark="❌" if q.from_user.id==g["creator_id"] else "⭕"; g["board"][idx]=mark
+    winner=_ttt_winner(g["board"])
+    if winner or " " not in g["board"]:
+        g["finished"]=True; db.set("tic_tac_toe",gid,g)
+        if winner:
+            win_id=g["creator_id"] if winner=="❌" else g["player2_id"]; win_name=g["creator_name"] if winner=="❌" else g["player2_name"]
+            text=f"🏆 <b>بازی تمام شد!</b>\\n\\nبرنده: {winner} <b>{html.escape(win_name)}</b> (<code>{win_id}</code>)"
+        else: text="🤝 <b>بازی مساوی شد!</b>"
+        await safe_edit_message(q.message,text,reply_markup=_ttt_keyboard(gid,g["board"],False),parse_mode=enums.ParseMode.HTML); await q.answer(); return
+    g["turn"]=g["player2_id"] if q.from_user.id==g["creator_id"] else g["creator_id"]; db.set("tic_tac_toe",gid,g)
+    turn_name=g["creator_name"] if g["turn"]==g["creator_id"] else g["player2_name"]; turn_mark="❌" if g["turn"]==g["creator_id"] else "⭕"
+    text=("🎮 <b>بازی دوز</b>\\n\\n"
+          f"❌ {html.escape(g['creator_name'])}\\n⭕ {html.escape(g['player2_name'])}\\n\\n"
+          f"نوبت: {turn_mark} <b>{html.escape(turn_name)}</b>")
+    await safe_edit_message(q.message,text,reply_markup=_ttt_keyboard(gid,g["board"]),parse_mode=enums.ParseMode.HTML); await q.answer()
+
 @bot.on_message(filters.command("start"))
 async def start_handler(client, message: Message):
     # همه کاربران می‌توانند ربات را با /start استفاده کنند.
