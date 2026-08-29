@@ -36,7 +36,6 @@ FORCE_CHANNELS = [
     "SH0PAL1",
 ]
 
-
 COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
 TOMAN_PER_COIN = 50000 / 1440
 card_info = {
@@ -849,33 +848,26 @@ async def user_info(client, message: Message):
 
 @bot.on_message(filters.command("admin") & filters.user(ADMIN_ID))
 async def admin_panel(client, message: Message):
+    """پنل مدیریت اصلی؛ دکمه مدیریت عکس شرط و دوز همیشه در همین پنل نمایش داده می‌شود."""
     users = db.data.get("users", {})
     active_count = len(db.data.get("processes", {}))
     total_credits = sum(db.data.get("credits", {}).values())
     pending_payments = len(db.get_pending_payments())
-    
     today = time.time() - 86400
-    new_today = sum(1 for user_data in users.values() if user_data.get('created_at', 0) > today)
-    
-    stats_text = f"""
-🛠 **پنل مدیریت ادمین — نسخه PHOTO-FIX**
+    new_today = sum(1 for user_data in users.values() if user_data.get("created_at", 0) > today)
 
-👥 **کل کاربران:** `{len(users)}`
-🟢 **کاربران فعال:** `{active_count}`
-🆕 **کاربران امروز:** `{new_today}`
-💰 **مجموع سکه ها:** `{total_credits}`
+    stats_text = (
+        "🛠 **پنل مدیریت ادمین**\n\n"
+        f"👥 **کل کاربران:** `{len(users)}`\n"
+        f"🟢 **کاربران فعال:** `{active_count}`\n"
+        f"🆕 **کاربران امروز:** `{new_today}`\n"
+        f"💰 **مجموع سکه ها:** `{total_credits}`\n\n"
+        f"📋 **درخواست‌های در انتظار:**\n└─ 💰 پرداخت: `{pending_payments}`\n"
+    )
 
-📋 **درخواست‌های در انتظار:**
-└─ 💰 پرداخت: `{pending_payments}`
-
-**📋 دستورات سریع:**
-`/set آیدی تعداد` - تنظیم سکه
-`/user آیدی` - اطلاعات کاربر
-`/admin` - این پنل
-"""
-    
+    # مهم: این دکمه مستقیماً در کیبورد اصلی /admin است.
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="admin_photo_manager", style=KeyboardButtonStyle(bg_primary=True))],
+        [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="ADMIN_PHOTO_PANEL", style=KeyboardButtonStyle(bg_primary=True))],
         [InlineKeyboardButton("👥 لیست کاربران", callback_data="admin_list"),
          InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
         [InlineKeyboardButton("💰 برترین کاربران", callback_data="admin_top"),
@@ -883,19 +875,7 @@ async def admin_panel(client, message: Message):
         [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
         [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
     ])
-    
     await message.reply_text(stats_text, reply_markup=keyboard)
-
-@bot.on_message(filters.command("adminphoto") & filters.user(ADMIN_ID))
-async def admin_photo_command(client, message: Message):
-    # مسیر مستقیم پشتیبان؛ همان صفحه‌ای را باز می‌کند که دکمه پنل مدیریت باز می‌کند.
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")],
-        [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")],
-        [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_back")]
-    ])
-    status = "عکس ذخیره شده: ✅ فعال" if db.data.get("bet_doz_image") else "عکس ذخیره شده: ❌ ندارد"
-    await message.reply_text(f"🖼 **مدیریت عکس شرط و دوز**\n\n{status}", reply_markup=kb)
 
 @bot.on_callback_query(filters.regex(r'^code_'))
 async def numpad_callback(client, callback_query):
@@ -1394,13 +1374,55 @@ async def show_main_menu(client, chat_id, user):
 
     await client.send_message(chat_id, welcome_text, reply_markup=keyboard)
 
-@bot.on_callback_query(filters.regex(r"^admin_photo_manager$"))
-async def admin_photo_manager_direct(client, callback_query):
-    # مسیر مستقیم برای اطمینان از اینکه دکمه مدیریت عکس همیشه داخل پنل مدیریت کار کند.
+@bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_PANEL$"))
+async def admin_photo_panel_handler(client, callback_query):
     if callback_query.from_user.id != ADMIN_ID:
         await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
         return
-    await admin_callback_handler(client, callback_query)
+    status = "✅ فعال" if db.data.get("bet_doz_image") else "❌ ندارد"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")],
+        [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")],
+        [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]
+    ])
+    await callback_query.message.edit_text(
+        f"🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: {status}",
+        reply_markup=kb
+    )
+    await callback_query.answer()
+
+@bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_SET$"))
+async def admin_photo_set_handler(client, callback_query):
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
+        return
+    admin_photo_wait.add(ADMIN_ID)
+    await callback_query.answer("✅ عکس را در همین چت ارسال کنید.", show_alert=True)
+
+@bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_DELETE$"))
+async def admin_photo_delete_handler(client, callback_query):
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
+        return
+    db.data.pop("bet_doz_image", None)
+    ok = db.save_data()
+    await callback_query.answer("✅ عکس حذف شد." if ok else "❌ خطا در ذخیره دیتابیس.", show_alert=True)
+    await callback_query.message.edit_text(
+        "🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: ❌ ندارد",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")],
+            [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")],
+            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]
+        ])
+    )
+
+@bot.on_callback_query(filters.regex(r"^ADMIN_PANEL_BACK$"))
+async def admin_panel_back_handler(client, callback_query):
+    if callback_query.from_user.id != ADMIN_ID:
+        await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
+        return
+    await admin_panel(client, callback_query.message)
+    await callback_query.answer()
 
 @bot.on_callback_query()
 async def callback_handler(client, callback_query):
@@ -2332,6 +2354,7 @@ async def handle_card_photo(client, message: Message):
             await message.reply_text("❌ خطا در ارسال به ادمین. لطفا بعدا تلاش کنید.")
 def main():
     print("● ربات سلف ساز روشن شد ●")
+    print("✅ ADMIN PHOTO PANEL: ENABLED")
     try: 
         bot.run()
     except KeyboardInterrupt: 
