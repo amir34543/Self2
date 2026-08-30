@@ -1,16 +1,15 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes, InlineQueryHandler, MessageHandler, filters
+from pyrogram import Client, enums, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent, KeyboardButtonStyle
 import logging
 
 TOKEN = "8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis" # توکن ربات هلپر
+API_ID = 35656061
+API_HASH = "b37f2596516bc0439bf505d1d230395c"
 
-# توجه برای اینکه هلپر کار کنه بابد بخش اینلاین مود ربات رو توی بات فادر فعال کنید
-
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+app = Client("helper_bot", bot_token=TOKEN, api_id=API_ID, api_hash=API_HASH)
 
 HELP_TEXTS = {
     "time": """
@@ -412,97 +411,120 @@ HELP_TEXTS = {
 <b>نکته:</b>
 تاخیر 4 ثانیه‌ ای برای جلوگیری از محدودیت
 """,
+    "extra": """
+✨ <b>امکانات جدید سلف</b>
+
+<b>تغییرات اکانت:</b>
+<code>پروفایل</code> (ریپلای روی عکس) - تغییر عکس اکانت
+<code>بایو متن جدید</code> - تغییر بیوگرافی
+<code>یوزر username</code> - تغییر آیدی
+
+<b>ابزارها:</b>
+<code>یادداشت متن</code> - ثبت یادداشت
+<code>یادداشت‌ها</code> - مشاهده یادداشت‌ها
+<code>حذف یادداشت آیدی</code>
+<code>ترجمه متن</code> (یا ریپلای) - ترجمه به فارسی
+<code>آب و هوا تهران</code> - وضعیت آب و هوا
+<code>بارکد متن</code> - ساخت QR Code
+
+<b>مدیریت چت:</b>
+<code>شنود روشن</code> - اطلاع از تگ شدن در گروه‌ها
+<code>حذف زمان‌دار 10</code> (ریپلای) - حذف پیام بعد از ۱۰ ثانیه
+<code>پاکسازی</code> - پاک کردن تاریخچه چت فعلی
+"""
 }
 
 def get_main_menu_page1(user_id):
-    """صفحه اول - دکمه‌های رنگی با چیدمان جدید"""
     keyboard = [
         [
-            InlineKeyboardButton("● ایدی ●", callback_data=f"help_id_{user_id}_1", style="primary"),
-            InlineKeyboardButton("● تایم ●", callback_data=f"help_time_{user_id}_1", style="primary")
+            InlineKeyboardButton("● ایدی ●", callback_data=f"help_id_{user_id}_1", style=KeyboardButtonStyle(bg_primary=True)),
+            InlineKeyboardButton("● تایم ●", callback_data=f"help_time_{user_id}_1", style=KeyboardButtonStyle(bg_primary=True))
         ],
         [
-            InlineKeyboardButton("● عکس تایمدار ●", callback_data=f"help_photo_{user_id}_1", style="primary"),
+            InlineKeyboardButton("● عکس تایمدار ●", callback_data=f"help_photo_{user_id}_1", style=KeyboardButtonStyle(bg_primary=True)),
         ],
         [
-            InlineKeyboardButton("● پشتیبان‌گیری ●", callback_data=f"help_backup_{user_id}_1", style="success"),
-            InlineKeyboardButton("● مدیریت فونت ●", callback_data=f"help_font_{user_id}_1", style="success")
+            InlineKeyboardButton("● پشتیبان‌گیری ●", callback_data=f"help_backup_{user_id}_1", style=KeyboardButtonStyle(bg_success=True)),
+            InlineKeyboardButton("● مدیریت فونت ●", callback_data=f"help_font_{user_id}_1", style=KeyboardButtonStyle(bg_success=True))
         ],
         [
-            InlineKeyboardButton("● قیمت ارز ●", callback_data=f"help_price_{user_id}_1", style="success"),
+            InlineKeyboardButton("● قیمت ارز ●", callback_data=f"help_price_{user_id}_1", style=KeyboardButtonStyle(bg_success=True)),
         ],
         [
-            InlineKeyboardButton("● فرمت متن ●", callback_data=f"help_format_{user_id}_1", style="danger"),
-            InlineKeyboardButton("● اسپم ●", callback_data=f"help_spam_{user_id}_1", style="danger")
+            InlineKeyboardButton("● فرمت متن ●", callback_data=f"help_format_{user_id}_1", style=KeyboardButtonStyle(bg_danger=True)),
+            InlineKeyboardButton("● اسپم ●", callback_data=f"help_spam_{user_id}_1", style=KeyboardButtonStyle(bg_danger=True))
         ],
         [
-            InlineKeyboardButton("● مدیریت دشمنان ●", callback_data=f"help_enemy_{user_id}_1", style="danger"),
+            InlineKeyboardButton("● مدیریت دشمنان ●", callback_data=f"help_enemy_{user_id}_1", style=KeyboardButtonStyle(bg_danger=True)),
         ],
         [
-            InlineKeyboardButton("● پاسخ خودکار ●", callback_data=f"help_autoreply_{user_id}_1", style="primary"),
+            InlineKeyboardButton("● پاسخ خودکار ●", callback_data=f"help_autoreply_{user_id}_1", style=KeyboardButtonStyle(bg_primary=True)),
         ],
         [
-            InlineKeyboardButton("● صفحه 2 → ●", callback_data=f"help_page2_{user_id}", style="success"),
-            InlineKeyboardButton("● بست ●", callback_data=f"help_close_{user_id}", style="danger")
+            InlineKeyboardButton("● صفحه 2 → ●", callback_data=f"help_page2_{user_id}", style=KeyboardButtonStyle(bg_success=True)),
+            InlineKeyboardButton("● بست ●", callback_data=f"help_close_{user_id}", style=KeyboardButtonStyle(bg_danger=True))
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_main_menu_page2(user_id):
-    """صفحه دوم - دکمه‌های رنگی با چیدمان جدید"""
     keyboard = [
         [
-            InlineKeyboardButton("● سیستم فحش ●", callback_data=f"help_insult_{user_id}_2", style="danger"),
-            InlineKeyboardButton("● همیشه آنلاین ●", callback_data=f"help_online_{user_id}_2", style="danger")
+            InlineKeyboardButton("● سیستم فحش ●", callback_data=f"help_insult_{user_id}_2", style=KeyboardButtonStyle(bg_danger=True)),
+            InlineKeyboardButton("● همیشه آنلاین ●", callback_data=f"help_online_{user_id}_2", style=KeyboardButtonStyle(bg_danger=True))
         ],
         [
-            InlineKeyboardButton("● قفل پیوی ●", callback_data=f"help_lock_{user_id}_2", style="danger"),
+            InlineKeyboardButton("● قفل پیوی ●", callback_data=f"help_lock_{user_id}_2", style=KeyboardButtonStyle(bg_danger=True)),
         ],
         [
-            InlineKeyboardButton("●️ انتی لاگین ●", callback_data=f"help_antilogin_{user_id}_2", style="primary"),
-            InlineKeyboardButton("● ریکشن خودکار ●", callback_data=f"help_reaction_{user_id}_2", style="primary")
+            InlineKeyboardButton("●️ انتی لاگین ●", callback_data=f"help_antilogin_{user_id}_2", style=KeyboardButtonStyle(bg_primary=True)),
+            InlineKeyboardButton("● ریکشن خودکار ●", callback_data=f"help_reaction_{user_id}_2", style=KeyboardButtonStyle(bg_primary=True))
         ],
         [
-            InlineKeyboardButton("● ویرایش سریع ●", callback_data=f"help_edit_{user_id}_2", style="primary"),
+            InlineKeyboardButton("● ویرایش سریع ●", callback_data=f"help_edit_{user_id}_2", style=KeyboardButtonStyle(bg_primary=True)),
         ],
         [
-            InlineKeyboardButton("● سیستم بنر ●", callback_data=f"help_banner_{user_id}_2", style="success"),
-            InlineKeyboardButton("● اینستاگرام ●", callback_data=f"help_instagram_{user_id}_2", style="success")
+            InlineKeyboardButton("● سیستم بنر ●", callback_data=f"help_banner_{user_id}_2", style=KeyboardButtonStyle(bg_success=True)),
+            InlineKeyboardButton("● اینستاگرام ●", callback_data=f"help_instagram_{user_id}_2", style=KeyboardButtonStyle(bg_success=True))
         ],
         [
-            InlineKeyboardButton("● دانلود تلگرام ●", callback_data=f"help_download_{user_id}_2", style="success"),
+            InlineKeyboardButton("● دانلود تلگرام ●", callback_data=f"help_download_{user_id}_2", style=KeyboardButtonStyle(bg_success=True)),
         ],
         [
-            InlineKeyboardButton("● مدیریت گروه/کانال ●", callback_data=f"help_new_{user_id}_2", style="primary"),
+            InlineKeyboardButton("● مدیریت گروه/کانال ●", callback_data=f"help_new_{user_id}_2", style=KeyboardButtonStyle(bg_primary=True)),
         ],
         [
-            InlineKeyboardButton("← صفحه 1", callback_data=f"help_page1_{user_id}", style="primary"),
-            InlineKeyboardButton("❌ بستن", callback_data=f"help_close_{user_id}", style="danger")
+            InlineKeyboardButton("✨ امکانات جدید", callback_data=f"help_extra_{user_id}_2", style=KeyboardButtonStyle(bg_success=True)),
+        ],
+        [
+            InlineKeyboardButton("← صفحه 1", callback_data=f"help_page1_{user_id}", style=KeyboardButtonStyle(bg_primary=True)),
+            InlineKeyboardButton("❌ بستن", callback_data=f"help_close_{user_id}", style=KeyboardButtonStyle(bg_danger=True))
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_back_button(user_id, from_page=1):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 بازگشت", callback_data=f"help_back_{user_id}_{from_page}", style="primary")]
+        [InlineKeyboardButton("🔙 بازگشت", callback_data=f"help_back_{user_id}_{from_page}", style=KeyboardButtonStyle(bg_primary=True))]
     ])
 
 def get_reopen_button(user_id):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 بازکردن پنل", callback_data=f"help_reopen_{user_id}", style="success")]
+        [InlineKeyboardButton("🔄 بازکردن پنل", callback_data=f"help_reopen_{user_id}", style=KeyboardButtonStyle(bg_success=True))]
     ])
 
-async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+@app.on_message(filters.command("start") & filters.private)
+async def show_menu(client, message):
+    user_id = message.from_user.id
     text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه اول - 10 قابلیت اصلی</i>"
-    await update.message.reply_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode='HTML')
+    await message.reply_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode=enums.ParseMode.HTML)
 
-async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.inline_query.query.strip().lower()
+@app.on_inline_query()
+async def inline_query_handler(client, inline_query):
+    query = inline_query.query.strip().lower()
     
     if query == "panel":
-        user_id = update.inline_query.from_user.id
-        
+        user_id = inline_query.from_user.id
         results = [
             InlineQueryResultArticle(
                 id="1",
@@ -510,7 +532,7 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
                 description="10 قابلیت اصلی - مدیریت کامل",
                 input_message_content=InputTextMessageContent(
                     message_text="<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه اول - 10 قابلیت اصلی</i>",
-                    parse_mode='HTML'
+                    parse_mode=enums.ParseMode.HTML
                 ),
                 reply_markup=get_main_menu_page1(user_id)
             ),
@@ -520,89 +542,77 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
                 description="11 قابلیت تکمیلی - ابزارهای پیشرفته",
                 input_message_content=InputTextMessageContent(
                     message_text="<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه دوم - 11 قابلیت تکمیلی</i>",
-                    parse_mode='HTML'
+                    parse_mode=enums.ParseMode.HTML
                 ),
                 reply_markup=get_main_menu_page2(user_id)
             )
         ]
-        await update.inline_query.answer(results, cache_time=300, is_personal=True)
+        await inline_query.answer(results, cache_time=300, is_personal=True)
+    else:
+        await inline_query.answer([], cache_time=10)
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    data = query.data
-    user_id = query.from_user.id
+@app.on_callback_query()
+async def callback_query_handler(client, callback_query):
+    data = callback_query.data
+    user_id = callback_query.from_user.id
     
     if not f"_{user_id}" in data:
-        await query.answer("دسترسی denied!", show_alert=True)
+        await callback_query.answer("دسترسی denied!", show_alert=True)
         return
+        
     parts = data.split("_")
     if len(parts) >= 3:
         action = parts[1]
-        if len(parts) >= 4 and parts[-1].isdigit():
-            page_num = int(parts[-1])
-        else:
-            page_num = 1 
+        page_num = int(parts[-1]) if len(parts) >= 4 and parts[-1].isdigit() else 1
     else:
-        await query.answer("داده نامعتبر!", show_alert=True)
+        await callback_query.answer("داده نامعتبر!", show_alert=True)
         return
     
-    print(f"Debug: action={action}, page={page_num}, data={data}")  # برای دیباگ
+    print(f"Debug: action={action}, page={page_num}, data={data}")
+    
     if action == "close":
         text = "✅ <b>پنل بسته شد</b>\n\n💡 برای باز کردن مجدد:\n<code>@BotUsername panel</code>"
-        await query.edit_message_text(text, reply_markup=get_reopen_button(user_id), parse_mode='HTML')
+        await callback_query.message.edit_text(text, reply_markup=get_reopen_button(user_id), parse_mode=enums.ParseMode.HTML)
+        await callback_query.answer()
         return
     
-    if action == "reopen":
+    if action == "reopen" or action == "page1":
         text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه اول - 10 قابلیت اصلی</i>"
-        await query.edit_message_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode='HTML')
-        return
-    
-    if action == "page1":
-        text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه اول - 10 قابلیت اصلی</i>"
-        await query.edit_message_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode='HTML')
+        await callback_query.message.edit_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode=enums.ParseMode.HTML)
+        await callback_query.answer()
         return
     
     if action == "page2":
         text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه دوم - 11 قابلیت تکمیلی</i>"
-        await query.edit_message_text(text, reply_markup=get_main_menu_page2(user_id), parse_mode='HTML')
+        await callback_query.message.edit_text(text, reply_markup=get_main_menu_page2(user_id), parse_mode=enums.ParseMode.HTML)
+        await callback_query.answer()
         return
     
     if action == "main":
-        text = HELP_TEXTS["main"]
-        await query.edit_message_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode='HTML')
+        text = HELP_TEXTS.get("main", "راهنما یافت نشد")
+        await callback_query.message.edit_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode=enums.ParseMode.HTML)
+        await callback_query.answer()
         return    
+        
     if action == "back":
-        if page_num == 1:
-            text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه اول - 10 قابلیت اصلی</i>"
-            await query.edit_message_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode='HTML')
-        elif page_num == 2:
+        if page_num == 2:
             text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه دوم - 11 قابلیت تکمیلی</i>"
-            await query.edit_message_text(text, reply_markup=get_main_menu_page2(user_id), parse_mode='HTML')
+            await callback_query.message.edit_text(text, reply_markup=get_main_menu_page2(user_id), parse_mode=enums.ParseMode.HTML)
         else:
             text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه اول - 10 قابلیت اصلی</i>"
-            await query.edit_message_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode='HTML')
+            await callback_query.message.edit_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode=enums.ParseMode.HTML)
+        await callback_query.answer()
         return
+        
     if action in HELP_TEXTS:
         text = HELP_TEXTS.get(action, "راهنمای این بخش آماده نیست.")
-        await query.edit_message_text(text, reply_markup=get_back_button(user_id, page_num), parse_mode='HTML')
+        await callback_query.message.edit_text(text, reply_markup=get_back_button(user_id, page_num), parse_mode=enums.ParseMode.HTML)
     else:
-        await query.answer(f"این بخش ({action}) آماده نیست!", show_alert=True)
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"Error: {context.error}")
-
-def main():
-    app = Application.builder().token(TOKEN).build()
-    
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, show_menu))
-    app.add_handler(InlineQueryHandler(handle_inline_query))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_error_handler(error_handler)
-    
-    print("🤖 ربات هلپر اجرا شد")
-    app.run_polling()
+        await callback_query.answer(f"این بخش ({action}) آماده نیست!", show_alert=True)
+        return
+        
+    await callback_query.answer()
 
 if __name__ == "__main__":
-    main()
+    print("🤖 ربات هلپر اجرا شد")
+    app.run()
