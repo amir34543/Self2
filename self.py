@@ -14,12 +14,12 @@ import sys
 from pyrogram.types import ChatMemberUpdated
 from pyrogram.errors import FloodWait
 
-bot_username = "Helpselfbotvippersian_bot" # ایدی ربات هلپر بدون @
+bot_username = "Helperbotpersian_bot" # ایدی ربات هلپر بدون @
 
 USER_ID = None
 PHONE = None
 API_ID = 35656061
-API_HASH = "b37f2596516bc0439bf505d1d230395c"
+API_HASH = "8868043854:AAHblyKRa-DbGHefUp7q8_Zw675JTfBdgBw"
 
 if len(sys.argv) > 1:
     USER_ID = int(sys.argv[1])
