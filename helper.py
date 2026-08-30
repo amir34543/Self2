@@ -42,18 +42,9 @@ HELP_TEXTS = {
 <b>مثال‌ها:</b>
 <code>اینستا https://www.instagram.com/reel/DOkym3fCFqg/</code>
 <code>اینستا https://www.instagram.com/p/CzuF4KQqJ7q/</code>
-<code>اینستا https://www.instagram.com/tv/Cxxxxxxxx/</code>
 
-<b>کاربرد:</b>
-• دانلود پست‌های اینستاگرام
-• دانلود ریل‌ ها و ویدیو ها
-• دانلود عکس‌های پست
-
-<b>قابلیت‌ها:</b>
 ✅ دانلود با کیفیت اصلی
 ✅ نمایش توضیحات پست
-✅ نمایش اطلاعات کاربر
-✅ آپلود در همان چت
 """,
 
     "id": """
@@ -62,32 +53,10 @@ HELP_TEXTS = {
 <b>دستور قابل کپی:</b>
 <code>ایدی</code>
 
-<b>دو حالت استفاده:</b>
-
-1️⃣ <b>بدون ریپلای:</b>
-<code>ایدی</code>
-• نمایش اطلاعات خودتان
-• نمایش اطلاعات چت فعلی
-• نمایش آیدی عددی
-
-2️⃣ <b>با ریپلای:</b>
-<code>ایدی</code> (روی پیام کاربر ریپلای)
-• نمایش اطلاعات کامل کاربر
-• نمایش گروه‌های مشترک  
-• نمایش آیدی و یوزرنیم
-
-<b>اطلاعات نمایش داده شده:</b>
-✅ آیدی عددی کاربر
+✅ نمایش آیدی عددی کاربر
 ✅ یوزرنیم و نام کامل
 ✅ وضعیت پریمیوم
-✅ تعداد عکس‌های پروفایل
-✅ آیدی چت و عنوان
-✅ تعداد اعضا (در گروه)
-✅ گروه‌های مشترک (در صورت وجود)
-
-<b>مثال خروجی:</b>
-• اطلاعات شما + چت فعلی
-• یا اطلاعات کاربر ریپلای شده
+✅ گروه‌های مشترک
 """,
 
     "photo": """
@@ -96,13 +65,7 @@ HELP_TEXTS = {
 <b>دستور قابل کپی:</b>
 <code>عکس سیو</code> (ریپلای روی عکس)
 
-<b>کاربرد:</b>
-ذخیره دستی عکس‌های تایمدار
-ارسال اطلاعات کامل کاربر
-
-<b>نکته:</b>
-فقط روی عکس‌های تایمدار کار می‌کند
-عکس معمولی قابل ذخیره نیست
+ذخیره دستی عکس‌های تایمدار با اطلاعات کامل کاربر
 """,
 
     "backup": """
@@ -111,12 +74,7 @@ HELP_TEXTS = {
 <b>دستور قابل کپی:</b>
 <code>سیو @یوزرنیم</code>
 
-<b>مثال:</b>
-<code>سیو @username</code>
-
-<b>کاربرد:</b>
-ذخیره تاریخچه چت در فایل متنی
-ارسال فایل به پیام‌های ذخیره شده
+ذخیره تاریخچه چت در فایل متنی و ارسال به پیام‌های ذخیره شده
 """,
 
     "font": """
@@ -126,290 +84,145 @@ HELP_TEXTS = {
 <code>لیست فونت</code>
 <code>تنظیم فونت 1</code> تا <code>تنظیم فونت 6</code>
 
-<b>کاربرد:</b>
-تغییر فونت نمایش زمان
-پیش‌نمایش فونت‌های مختلف
-اعمال فونت روی زمان به صورت زنده
+تغییر فونت نمایش زمان کنار نام کاربری
 """,
 
     "price": """
 💱 <b>قیمت ارز</b>
 
 <b>دستور قابل کپی:</b>
-<code>قیمت ارز</code>
-
-<b>مثال‌ها:</b>
 <code>قیمت BTC</code>
-<code>قیمت ETH</code>
 <code>قیمت TON</code>
 
-<b>کاربرد:</b>
-نمایش قیمت لحظه‌ای ارزهای دیجیتال
-نمایش قیمت تومانی و دلاری
-نمایش تغییرات 24 ساعته
-میتوانید اسم ارزو رو به فارسی بزارید
+نمایش قیمت لحظه‌ای ارزهای دیجیتال (تومانی و دلاری)
 """,
 
     "spam": """
 🔁 <b>ارسال اسپم</b>
 
 <b>دستور قابل کپی:</b>
-<code>اسپم تعداد متن</code>
-
-<b>مثال‌ها:</b>
 <code>اسپم 10 سلام</code>
-<code>اسپم 5 تست</code>
 
-<b>کاربرد:</b>
-ارسال پیام تکراری
-حداکثر 50 پیام در یک دستور
-قابلیت ریپلای روی پیام
+ارسال پیام تکراری (حداکثر ۵۰ پیام در یک دستور)
 """,
 
     "format": """
 🎨 <b>سیستم فرمت خودکار HTML</b>
 
-<b>دستورات قابل کپی:</b>
+<b>دستورات:</b>
 <code>فرمت بولد روشن</code>
-<code>فرمت بولد خاموش</code>
-<code>فرمت ایتالیک روشن</code>
 <code>فرمت ایتالیک خاموش</code>
-<code>فرمت زیرخط روشن</code>
-<code>فرمت زیرخط خاموش</code>
-<code>فرمت خط‌خورده روشن</code>
-<code>فرمت خط‌خورده خاموش</code>
-<code>فرمت اسپویلر روشن</code>
-<code>فرمت اسپویلر خاموش</code>
-<code>فرمت کد روشن</code>
-<code>فرمت کد خاموش</code>
-<code>فرمت پیش‌فرمت روشن</code>
-<code>فرمت پیش‌فرمت خاموش</code>
-<code>فرمت نقل‌قول روشن</code>
-<code>فرمت نقل‌قول خاموش</code>
-<code>فرمت وضعیت</code>
 <code>فرمت ریست</code>
 
-<b>کاربرد:</b>
-تبدیل خودکار پیام‌ ها به فرمت‌ های مختلف
-پشتیبانی از تمام تگ‌های HTML تلگرام
-امکان استفاده همزمان از چندین فرمت
-
-<b>فرمت‌های پشتیبانی شده:</b>
-• <b>بولد</b> - <b>متن بولد</b>
-• <i>ایتالیک</i> - <i>متن ایتالیک</i>
-• <u>زیرخط</u> - <u>متن زیرخط دار</u>
-• <s>خط‌خورده</s> - <s>متن خط خورده</s>
-• <code>کد</code> - <code>متن کد</code>
-• <pre>پیش‌فرمت</pre> - <pre>متن پیش‌فرمت</pre>
-• <blockquote>نقل‌قول</blockquote> - <blockquote>متن نقل قول</blockquote>
+تبدیل خودکار پیام‌ها به فرمت‌های مختلف تایپی
 """,
 
     "enemy": """
 👿 <b>مدیریت دشمنان</b>
 
-<b>دستورات قابل کپی:</b>
+<b>دستورات:</b>
 <code>دشمن</code> (ریپلای روی پیام کاربر)
-<code>حذف دشمن</code> (ریپلای روی پیام کاربر)
+<code>حذف دشمن</code>
 <code>لیست دشمن</code>
-<code>دشمنان</code>
-<code>پاک کردن دشمنان</code>
 
-<b>کاربرد:</b>
-افزودن کاربر به لیست دشمنان
-ارسال خودکار فحش رندوم به دشمنان
-مدیریت لیست دشمنان
-نمایش اطلاعات کامل دشمنان
-حذف دشمن از لیست
+ارسال خودکار فحش رندوم به دشمنان در پیوی و گروه
 """,
 
     "autoreply": """
 🤖 <b>پاسخ خودکار</b>
 
-<b>دستورات قابل کپی:</b>
+<b>دستورات:</b>
 <code>پاسخ افزودن سلام|سلام چطوری</code>
 <code>پاسخ حذف سلام</code>
-<code>پاسخ لیست</code>
 
-<b>مثال‌ها:</b>
-<code>پاسخ افزودن سلا|سلام عزیزم</code>
-<code>پاسخ افزودن چطوری|خوبم ممنون</code>
-<code>پاسخ حذف سلا</code>
-
-<b>کاربرد:</b>
-تنظیم پاسخ خودکار برای کلمات خاص
-لیست پاسخ‌ های تنظیم شده
+تنظیم پاسخ خودکار برای کلمات خاص در پیوی
 """,
 
     "insult": """
 💢 <b>مدیریت فحش‌ها</b>
 
-<b>دستورات قابل کپی:</b>
-<code>فحش افزودن متن فحش</code>
-<code>فحش حذف متن فحش</code>
+<b>دستورات:</b>
+<code>فحش افزودن [متن]</code>
+<code>فحش حذف [متن]</code>
 
-<b>مثال‌ها:</b>
-<code>فحش افزودن تو احمقی</code>
-<code>فحش افزودن برو گمشو</code>
-<code>فحش حذف تو احمقی</code>
-
-<b>کاربرد:</b>
-افزودن فحش‌های جدید به لیست
-حذف فحش ‌های موجود
-ارسال رندوم فحش به دشمنان
+مدیریت لیست فحش‌هایی که به دشمنان ارسال می‌شود
 """,
 
     "online": """
 🌐 <b>حالت همیشه آنلاین</b>
 
-<b>دستورات قابل کپی:</b>
+<b>دستورات:</b>
 <code>آنلاین روشن</code>
 <code>آنلاین خاموش</code>
 
-<b>کاربرد:</b>
-فعال کردن حالت همیشه آنلاین
-نمایش آنلاین دائمی در تلگرام
-مناسب برای نشان دادن فعالیت دائمی
+فعال کردن حالت همیشه آنلاین در تلگرام
 """,
 
     "lock": """
 🔒 <b>سیستم قفل پیوی</b>
 
-<b>دستورات قابل کپی:</b>
+<b>دستورات:</b>
 <code>همه روشن</code>
-<code>همه خاموش</code>
 <code>مدیا روشن</code>
-<code>مدیا خاموش</code>
 <code>استیکر روشن</code>
-<code>استیکر خاموش</code>
-<code>فوروارد روشن</code>
-<code>فوروارد خاموش</code>
-<code>وویس روشن</code>
-<code>وویس خاموش</code>
-<code>پیام روشن</code>
-<code>پیام خاموش</code>
-<code>فایل روشن</code>
-<code>فایل خاموش</code>
 <code>وضعیت قفل</code>
-<code>ریست قفل</code>
-<code>راهنمای قفل</code>
 
-<b>کاربرد:</b>
 محدود کردن ارسال انواع پیام در پیوی
-حذف خودکار پیام‌های غیرمجاز
-مدیریت دسترسی ‌های کاربران
-نمایش وضعیت قفل ‌ها
 """,
 
     "antilogin": """
 🛡️ <b>سیستم انتی لاگین</b>
 
-<b>دستورات قابل کپی:</b>
+<b>دستورات:</b>
 <code>انتی لاگین روشن</code>
 <code>انتی لاگین خاموش</code>
-<code>انتی لاگین</code>
 
-<b>کاربرد:</b>
-منقضی کردن کد اتوماتیک
-جلوگیری از ورود به اکانت
+منقضی کردن کد اتوماتیک و جلوگیری از هک اکانت
 """,
 
     "reaction": """
 🎭 <b>سیستم ریکشن خودکار</b>
 
-<b>دستورات قابل کپی:</b>
-<code>ریکت ایموجی</code> (ریپلای روی کاربر)
-<code>حذف ریکت</code> (ریپلای روی کاربر)
-<code>لیست ریکت</code>
-<code>پاکسازی ریکت</code>
+<b>دستورات:</b>
+<code>ریکت 😊</code> (ریپلای روی کاربر)
+<code>حذف ریکت</code>
 
-<b>مثال‌ها:</b>
-<code>ریکت 🚀</code> (ریپلای)
-<code>ریکت ❤️</code> (ریپلای)
-<code>حذف ریکت</code> (ریپلای)
-
-<b>کاربرد:</b>
-تنظیم ریکشن خودکار برای کاربران خاص
-اعمال ریکشن روی تمام پیام‌ های کاربر
-مدیریت لیست ریکشن‌ ‌ها
-حذف ریکشن کاربران
+اعمال ریکشن خودکار روی تمام پیام‌های یک کاربر خاص
 """,
 
     "edit": """
 ✏️ <b>ویرایش سریع پیام</b>
 
-<b>دستور قابل کپی:</b>
+<b>دستور:</b>
 <code>ویرایش کلمه_قدیمی به کلمه_جدید</code> (ریپلای)
 
-<b>مثال‌ها:</b>
-<code>ویرایش سلان به سلام</code>
-<code>ویرایش احمق به عزیز</code>
-<code>ویرایش بد به خوب</code>
-
-<b>کاربرد:</b>
-جایگزینی سریع کلمه در پیام
-ریپلای روی پیام مورد نظر
-حذف خودکار پیام دستور
-جایگزینی فقط کلمه مشخص شده
+جایگزینی سریع کلمه در پیام بدون نیاز به کپی و ادیت دستی
 """,
 
     "banner": """
 📢 <b>سیستم مدیریت بنر</b>
 
-<b>دستورات قابل کپی:</b>
+<b>دستورات:</b>
 <code>تنظیم بنر</code> (ریپلای روی پیام)
-<code>بنر همگانی کد</code>
-<code>لیست بنرها</code>
-<code>بنر همگانی خاموش</code>
-<code>بنر ارسال کد</code>
-<code>زمان بنر دقیقه</code>
-
-<b>مثال‌ها:</b>
-<code>تنظیم بنر</code> (ریپلای)
 <code>بنر همگانی 1</code>
-<code>بنر ارسال 1</code>
-<code>زمان بنر 5</code>
 
-<b>کاربرد:</b>
-ثبت پیام به عنوان بنر
-ارسال همگانی به گروه‌ها و سوپرگروه ‌ها
-مدیریت بنرهای ثبت شده
-تنظیم زمان بین ارسال‌ ها
-ارسال فوری بنر
+ارسال همگانی بنر به گروه‌ها و سوپرگروه‌ها
 """,
 
     "download": """
 📥 <b>دانلودر تلگرام</b>
 
 <b>دستور قابل کپی:</b>
-<code>دانلود لینک_پست</code>
-
-<b>مثال‌ها:</b>
 <code>دانلود https://t.me/channel/123</code>
-<code>دانلود https://t.me/username/456</code>
-<code>دانلود https://t.me/c/channel_id/post_id</code>
 
-💡 <b>کاربرد اصلی:</b>
-دانلود پست کانال های اسکم یا گروه ها
+دانلود پست کانال‌های اسکم یا گروه‌ها
 """,
     "new": """
-🆕 <b>دستورات مربوط به کانال و گروه</b>
+🆕 <b>دستورات گروه/کانال</b>
 
-<b>دستورات قابل کپی:</b>
 <code>پینگ</code>
 <code>تعداد کانال ها</code>
-<code>تعداد گروه ها</code>
 <code>خروج همه کانال</code>
-<code>خروج همه گروه</code>
-
-<b>کاربرد:</b>
-• <code>پینگ</code> - بررسی سرعت ربات
-• <code>تعداد کانال ها</code> - نمایش آمار دقیق کانال‌ها
-• <code>تعداد گروه ها</code> - نمایش آمار دقیق گروه‌ها
-• <code>خروج همه کانال</code> - خروج از تمام کانال‌ها با تاخیر
-• <code>خروج همه گروه</code> - خروج از تمام گروه‌ها با تاخیر
-
-<b>نکته:</b>
-تاخیر 4 ثانیه‌ ای برای جلوگیری از محدودیت
 """,
     "extra": """
 ✨ <b>امکانات جدید سلف</b>
@@ -422,7 +235,6 @@ HELP_TEXTS = {
 <b>ابزارها:</b>
 <code>یادداشت متن</code> - ثبت یادداشت
 <code>یادداشت‌ها</code> - مشاهده یادداشت‌ها
-<code>حذف یادداشت آیدی</code>
 <code>ترجمه متن</code> (یا ریپلای) - ترجمه به فارسی
 <code>آب و هوا تهران</code> - وضعیت آب و هوا
 <code>بارکد متن</code> - ساخت QR Code
@@ -568,50 +380,41 @@ async def callback_query_handler(client, callback_query):
         await callback_query.answer("داده نامعتبر!", show_alert=True)
         return
     
-    print(f"Debug: action={action}, page={page_num}, data={data}")
-    
+    # استفاده از edit_message_text برای پشتیبانی از پیام‌های اینلاین
     if action == "close":
         text = "✅ <b>پنل بسته شد</b>\n\n💡 برای باز کردن مجدد:\n<code>@BotUsername panel</code>"
-        await callback_query.message.edit_text(text, reply_markup=get_reopen_button(user_id), parse_mode=enums.ParseMode.HTML)
+        await callback_query.edit_message_text(text, reply_markup=get_reopen_button(user_id), parse_mode=enums.ParseMode.HTML)
         await callback_query.answer()
         return
     
     if action == "reopen" or action == "page1":
         text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه اول - 10 قابلیت اصلی</i>"
-        await callback_query.message.edit_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode=enums.ParseMode.HTML)
+        await callback_query.edit_message_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode=enums.ParseMode.HTML)
         await callback_query.answer()
         return
     
     if action == "page2":
         text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه دوم - 11 قابلیت تکمیلی</i>"
-        await callback_query.message.edit_text(text, reply_markup=get_main_menu_page2(user_id), parse_mode=enums.ParseMode.HTML)
+        await callback_query.edit_message_text(text, reply_markup=get_main_menu_page2(user_id), parse_mode=enums.ParseMode.HTML)
         await callback_query.answer()
         return
     
-    if action == "main":
-        text = HELP_TEXTS.get("main", "راهنما یافت نشد")
-        await callback_query.message.edit_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode=enums.ParseMode.HTML)
-        await callback_query.answer()
-        return    
-        
     if action == "back":
         if page_num == 2:
             text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه دوم - 11 قابلیت تکمیلی</i>"
-            await callback_query.message.edit_text(text, reply_markup=get_main_menu_page2(user_id), parse_mode=enums.ParseMode.HTML)
+            await callback_query.edit_message_text(text, reply_markup=get_main_menu_page2(user_id), parse_mode=enums.ParseMode.HTML)
         else:
             text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه اول - 10 قابلیت اصلی</i>"
-            await callback_query.message.edit_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode=enums.ParseMode.HTML)
+            await callback_query.edit_message_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode=enums.ParseMode.HTML)
         await callback_query.answer()
         return
         
     if action in HELP_TEXTS:
         text = HELP_TEXTS.get(action, "راهنمای این بخش آماده نیست.")
-        await callback_query.message.edit_text(text, reply_markup=get_back_button(user_id, page_num), parse_mode=enums.ParseMode.HTML)
+        await callback_query.edit_message_text(text, reply_markup=get_back_button(user_id, page_num), parse_mode=enums.ParseMode.HTML)
+        await callback_query.answer()
     else:
         await callback_query.answer(f"این بخش ({action}) آماده نیست!", show_alert=True)
-        return
-        
-    await callback_query.answer()
 
 if __name__ == "__main__":
     print("🤖 ربات هلپر اجرا شد")
