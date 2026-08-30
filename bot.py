@@ -32,7 +32,7 @@ os.makedirs("sessions", exist_ok=True)
 
 # لیست کانال ها کم یا زیاد میتونید کنید بدون @
 FORCE_CHANNELS = [
-    "t.me/SelfPersiangulf",
+    "SelfPersiangulf",
 ]
 
 COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
