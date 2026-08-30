@@ -1,13 +1,3 @@
-برای حل این مشکل، دو کار اصلی انجام دادم:
-۱. دکمه «🛒 خرید سلف» را تغییر دادم تا به جای رفتن به بخش خرید الماس، متن راهنمای فعالسازی را نشان دهد.
-۲. یک دکمه شیشه‌ای (Reply Keyboard) پایین صفحه اضافه کردم که کاربر با زدن آن، شماره خود را بدون نیاز به تایپ ارسال می‌کند (دقیقاً همان پیامی که تلگرام برای اشتراک‌گذاری شماره می‌دهد).
-۳. مشکل خرید الماس برای ادمین را هم برطرف کردم (قبلاً ادمین نمی‌توانست عدد وارد کند چون ربات آن را دستور مدیریتی فرض می‌کرد).
-
-**نکته مهم:** برای جلوگیری از ارور قبلی، حتماً از دکمه **Copy** که در گوشه بالا سمت راست کد قرار دارد استفاده کنید و کل فایل قبلی را پاک کرده و این را جایگزین کنید.
-
-کل کد اصلاح‌شده:
-
-```python
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
