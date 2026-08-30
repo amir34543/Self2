@@ -1,4 +1,5 @@
 import requests
+import urllib.parse
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import os, asyncio, aiohttp, random, re
@@ -39,6 +40,7 @@ SAVED_PHOTOS_DIR = "saved_photos"
 INSULTS_FILE = "insults.txt"
 ENEMIES_FILE = "enemies.txt"
 BACKUPS_DIR = "backups"
+NOTES_FILE = "notes.json" # فایل یادداشت‌ها
 online_task = None
 self_mode_active = True
 
@@ -66,6 +68,7 @@ user_time_status = {}; banners = {}; active_broadcasts = {}; banner_counter = 1
 user_original_names = {}; user_fonts = {}; user_cache = {}; CACHE_TIMEOUT = 300 
 photo_save_active = True; time_updater_started = False; bold_enabled = {}
 auto_replies = {}; enemies = set(); always_online_enabled = False
+tag_logger_on = False # متغیر سیستم شنود
 
 FONTS = {
     1: {'0':'𝟎','1':'𝟏','2':'𝟐','3':'𝟑','4':'𝟒','5':'𝟓','6':'𝟔','7':'𝟕','8':'𝟖','9':'𝟗'},
@@ -83,6 +86,67 @@ def get_persian_action_name(english_name):
 def get_english_action_name(persian_name):
     english_map = {"تایپ": "typing", "اپلود فایل": "upload_document", "اپلود عکس": "upload_photo", "اپلود ویدیو": "upload_video", "اپلود ویس": "upload_audio", "اپلود ویدیو نوت": "upload_video_note", "ضبط ویس": "record_audio", "ضبط ویدیو": "record_video", "ضبط ویدیو نوت": "record_video_note", "بازی": "playing", "انتخاب مخاطب": "choose_contact", "پیدا کردن موقعیت": "find_location", "انتخاب استیکر": "choose_sticker"}
     return english_map.get(persian_name, persian_name)
+
+# ==============================
+# توابع مدیریت فایل‌ها (یادداشت‌ها، دشمنان، فحش‌ها و...)
+# ==============================
+def load_notes():
+    if os.path.exists(NOTES_FILE):
+        try:
+            with open(NOTES_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+        except: return {}
+    return {}
+
+def save_notes(notes):
+    with open(NOTES_FILE, 'w', encoding='utf-8') as f: json.dump(notes, f, ensure_ascii=False)
+
+def load_insults() -> list:
+    try:
+        if os.path.exists(INSULTS_FILE):
+            with open(INSULTS_FILE, 'r', encoding='utf-8') as f: return [line.strip() for line in f.readlines() if line.strip()]
+        return []
+    except: return []
+
+def save_insults(insults_list: list) -> bool:
+    try:
+        with open(INSULTS_FILE, 'w', encoding='utf-8') as f:
+            for insult in insults_list: f.write(insult + '\n')
+        return True
+    except: return False
+
+def load_enemies() -> set:
+    try:
+        if os.path.exists(ENEMIES_FILE):
+            with open(ENEMIES_FILE, 'r', encoding='utf-8') as f: return set(int(line.strip()) for line in f.readlines() if line.strip())
+        return set()
+    except: return set()
+
+def save_enemies(enemies_set: set) -> bool:
+    try:
+        with open(ENEMIES_FILE, 'w', encoding='utf-8') as f:
+            for enemy_id in enemies_set: f.write(str(enemy_id) + '\n')
+        return True
+    except: return False
+
+def is_enemy(user_id: int) -> bool: return user_id in enemies
+
+def save_reactions():
+    try:
+        with open("mmauto_reactions.json", "w", encoding="utf-8") as f: json.dump(auto_reactions, f, ensure_ascii=False, indent=4)
+        return True
+    except: return False
+
+def load_reactions():
+    try:
+        if os.path.exists("mmauto_reactions.json"):
+            with open("mmauto_reactions.json", "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                return json.loads(content) if content else {}
+        return {}
+    except: return {}
+
+enemies = load_enemies()
+auto_reactions = load_reactions()
 
 async def apply_chat_actions(client: Client, message: Message):
     if not message.from_user or message.from_user.id == (await client.get_me()).id: return    
@@ -122,54 +186,6 @@ async def send_instant_broadcast(client: Client, banner_id: int):
                 await asyncio.sleep(2) 
             except: continue
     await client.send_message("me", f"✅ **ارسال بنر کامل شد**\n\n📤 **تعداد ارسال شده:** {sent_count} گروه")
-
-def save_reactions():
-    try:
-        with open("mmauto_reactions.json", "w", encoding="utf-8") as f: json.dump(auto_reactions, f, ensure_ascii=False, indent=4)
-        return True
-    except: return False
-
-def load_reactions():
-    try:
-        if os.path.exists("mmauto_reactions.json"):
-            with open("mmauto_reactions.json", "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                return json.loads(content) if content else {}
-        return {}
-    except: return {}
-
-def load_insults() -> list:
-    try:
-        if os.path.exists(INSULTS_FILE):
-            with open(INSULTS_FILE, 'r', encoding='utf-8') as f: return [line.strip() for line in f.readlines() if line.strip()]
-        return []
-    except: return []
-
-def save_insults(insults_list: list) -> bool:
-    try:
-        with open(INSULTS_FILE, 'w', encoding='utf-8') as f:
-            for insult in insults_list: f.write(insult + '\n')
-        return True
-    except: return False
-
-def load_enemies() -> set:
-    try:
-        if os.path.exists(ENEMIES_FILE):
-            with open(ENEMIES_FILE, 'r', encoding='utf-8') as f: return set(int(line.strip()) for line in f.readlines() if line.strip())
-        return set()
-    except: return set()
-
-def save_enemies(enemies_set: set) -> bool:
-    try:
-        with open(ENEMIES_FILE, 'w', encoding='utf-8') as f:
-            for enemy_id in enemies_set: f.write(str(enemy_id) + '\n')
-        return True
-    except: return False
-
-def is_enemy(user_id: int) -> bool: return user_id in enemies
-
-enemies = load_enemies()
-auto_reactions = load_reactions()
 
 async def apply_auto_reaction(client, message):
     if not message.from_user or message.from_user.id == (await client.get_me()).id: return
@@ -324,6 +340,19 @@ async def global_message_handler(client: Client, message: Message):
     if user_id == 777000:
         await forward_and_save_login_codes(client, message)
         return
+    
+    # سیستم شنود (تگ لاگر)
+    if tag_logger_on and message.entities and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+        me = await client.get_me()
+        if me.username:
+            for entity in message.entities:
+                if entity.type == "mention" and f"@{me.username}" in message_text:
+                    try:
+                        chat_link = f"https://t.me/{message.chat.username}/{message.id}" if message.chat.username else "گروه خصوصی"
+                        await client.send_message("me", f"🔔 **شما در یک گروه تگ شدید!**\n\n👤 کاربر: {message.from_user.first_name}\n💬 پیام: {message_text}\n🔗 لینک: {chat_link}")
+                    except: pass
+                    break
+
     if str(user_id) in auto_reactions:
         try: await client.send_reaction(chat_id=message.chat.id, message_id=message.id, emoji=auto_reactions[str(user_id)])
         except: pass
@@ -443,33 +472,7 @@ async def unpin_message(client, message):
         await message.edit("✅ **پیام آنپین شد**"); await asyncio.sleep(2); await message.delete()
     except Exception as e: await message.edit(f"❌ **خطا:** `{str(e)}`")
 
-@app.on_message(filters.me & filters.regex(r'^تنظیم عنوان (.+)$') & filters.group)
-async def set_chat_title(client, message):
-    try:
-        new_title = message.matches[0].group(1)
-        await client.set_chat_title(message.chat.id, new_title)
-        await message.edit(f"✅ **عنوان گروه تغییر کرد**\n📝 عنوان جدید: {new_title}")
-    except Exception as e: await message.edit(f"❌ **خطا:** `{str(e)}`")
-
-@app.on_message(filters.me & filters.regex(r'^تنظیم توضیحات (.+)$') & filters.group)
-async def set_chat_description(client, message):
-    try:
-        new_description = message.matches[0].group(1)
-        await client.set_chat_description(message.chat.id, new_description)
-        await message.edit(f"✅ **توضیحات گروه تغییر کرد**\n📝 توضیحات جدید: {new_description}")
-    except Exception as e: await message.edit(f"❌ **خطا:** `{str(e)}`")
-
-@app.on_message(filters.me & filters.regex(r'^تنظیم عکس$') & filters.group)
-async def set_chat_photo(client, message):
-    if not message.reply_to_message or not message.reply_to_message.photo: return await message.edit("❌ **لطفا روی یک عکس ریپلای کنید**")
-    try:
-        photo_path = await message.reply_to_message.download()
-        await client.set_chat_photo(chat_id=message.chat.id, photo=photo_path)
-        os.remove(photo_path)
-        await message.edit("✅ **عکس گروه تغییر کرد**")
-    except Exception as e: await message.edit(f"❌ **خطا:** `{str(e)}`")
-
-@app.on_message(filters.me & filters.text & ~filters.command(["سیو", "پنل", "لیست فحش", "آنلاین", "دانلود", "ایدی", "تایم", "وضعیت", "لیست فونت", "تنظیم فونت", "قیمت", "اسپم", "بولد", "پاسخ", "دشمن", "فحش", "حذف", "لیست دشمن", "دشمنان", "پاک کردن دشمنان", "همه", "مدیا", "استیکر", "فوروارد", "وویس", "پیام", "فایل", "وضعیت قفل", "ریست قفل", "راهنمای قفل", "انتی لاگین", "ریکت", "حذف ریکت", "لیست ریکت", "پاکسازی ریکت", "ویرایش", "تنظیم بنر", "بنر همگانی", "لیست بنرها", "حذف بنر", "بنر همگانی خاموش", "بنر ارسال", "زمان بنر", "فرمت", "پینگ", "تعداد کانال ها", "تعداد گروه ها", "خروج همه کانال", "خروج همه گروه", "اکشن", "اینستا"], prefixes=""))
+@app.on_message(filters.me & filters.text & ~filters.command(["سیو", "پنل", "لیست فحش", "آنلاین", "دانلود", "ایدی", "تایم", "وضعیت", "لیست فونت", "تنظیم فونت", "قیمت", "اسپم", "بولد", "پاسخ", "دشمن", "فحش", "حذف", "لیست دشمن", "دشمنان", "پاک کردن دشمنان", "همه", "مدیا", "استیکر", "فوروارد", "وویس", "پیام", "فایل", "وضعیت قفل", "ریست قفل", "راهنمای قفل", "انتی لاگین", "ریکت", "حذف ریکت", "لیست ریکت", "پاکسازی ریکت", "ویرایش", "تنظیم بنر", "بنر همگانی", "لیست بنرها", "حذف بنر", "بنر همگانی خاموش", "بنر ارسال", "زمان بنر", "فرمت", "پینگ", "تعداد کانال ها", "تعداد گروه ها", "خروج همه کانال", "خروج همه گروه", "اکشن", "اینستا", "پروفایل", "بایو", "یوزر", "یادداشت", "یادداشت‌ها", "ترجمه", "آب و هوا", "بارکد", "شنود", "حذف زمان‌دار", "پاکسازی"], prefixes=""))
 async def auto_html_format_messages(client, message):
     if any(format_settings.values()):
         original_text = message.text; formatted_text = original_text
@@ -1071,7 +1074,6 @@ async def instagram_download_command(client: Client, message: Message):
         if not url.startswith(("https://www.instagram.com/", "https://instagram.com/")): return await message.edit("❌ **لینک نامعتبر!**")
         loading_msg = await message.edit("🔄 **در حال دریافت اطلاعات از اینستاگرام...**")
         api_key = "8000978149:uJC3mxBncq9ELPN@Api_ManagerRoBOT"
-        import urllib.parse
         encoded_url = urllib.parse.quote(url, safe='')
         final_api_url = f"https://api.fast-creat.ir/instagram?apikey={api_key}&type=post&url={encoded_url}"
         response = requests.get(final_api_url, timeout=45)
@@ -1134,7 +1136,152 @@ async def ping_command(client: Client, message: Message):
     ping_time = (end_time - start_time).microseconds / 1000
     await ping_msg.edit(f"**🏓 پونگ!**\n**⏱ سرعت: {ping_time:.2f} ms**")
 
-# ✅ هندلر پنل با مدیریت خطای پیشرفته
+# ==============================
+# قابلیت‌های جدید اضافه شده
+# ==============================
+
+@app.on_message(filters.me & filters.command("پروفایل", prefixes="") & filters.regex(r"^پروفایل$"))
+async def set_pfp(client, message):
+    if not message.reply_to_message or not message.reply_to_message.photo:
+        return await message.edit("❌ **لطفا روی یک عکس ریپلای کنید**")
+    loading_msg = await message.edit("🖼 **در حال تغییر عکس پروفایل...**")
+    try:
+        file_path = await message.reply_to_message.download()
+        await client.set_profile_photo(photo=file_path)
+        os.remove(file_path)
+        await loading_msg.edit("✅ **عکس پروفایل با موفقیت تغییر کرد**")
+    except Exception as e:
+        await loading_msg.edit(f"❌ **خطا:** `{str(e)}`")
+
+@app.on_message(filters.me & filters.command("بایو", prefixes=""))
+async def set_bio(client, message):
+    if len(message.command) < 2:
+        return await message.edit("❌ **استفاده:** `بایو متن جدید`")
+    bio = ' '.join(message.command[1:])
+    try:
+        await client.update_profile(bio=bio)
+        await message.edit(f"✅ **بیوگرافی تغییر کرد:**\n{bio}")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{e}`")
+
+@app.on_message(filters.me & filters.command("یوزر", prefixes=""))
+async def set_username(client, message):
+    if len(message.command) < 2:
+        return await message.edit("❌ **استفاده:** `یوزر username`")
+    uname = message.command[1].lstrip('@')
+    try:
+        await client.set_username(uname)
+        await message.edit(f"✅ **نام کاربری تغییر کرد:** @{uname}")
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{e}`")
+
+@app.on_message(filters.me & filters.command("یادداشت", prefixes=""))
+async def add_note(client, message):
+    if len(message.command) < 2: return await message.edit("❌ **استفاده:** `یادداشت متن`")
+    notes = load_notes()
+    note_id = str(len(notes) + 1)
+    notes[note_id] = ' '.join(message.command[1:])
+    save_notes(notes)
+    await message.edit(f"✅ **یادداشت شماره {note_id} ذخیره شد**")
+
+@app.on_message(filters.me & filters.command("یادداشت‌ها", prefixes=""))
+async def list_notes(client, message):
+    notes = load_notes()
+    if not notes: return await message.edit("❌ **هیچ یادداشتی ثبت نشده**")
+    text = "📝 **لیست یادداشت‌ها**\n\n"
+    for nid, txt in notes.items(): text += f"**{nid}.** {txt[:50]}...\n"
+    await message.edit(text)
+
+@app.on_message(filters.me & filters.command("حذف یادداشت", prefixes=""))
+async def del_note(client, message):
+    if len(message.command) < 2: return await message.edit("❌ **استفاده:** `حذف یادداشت آیدی`")
+    notes = load_notes()
+    nid = message.command[1]
+    if nid in notes:
+        del notes[nid]; save_notes(notes)
+        await message.edit(f"✅ **یادداشت {nid} حذف شد**")
+    else: await message.edit("❌ **یادداشت یافت نشد**")
+
+@app.on_message(filters.me & filters.command("ترجمه", prefixes=""))
+async def translate_text(client, message):
+    text_to_translate = ""
+    if message.reply_to_message and (message.reply_to_message.text or message.reply_to_message.caption):
+        text_to_translate = message.reply_to_message.text or message.reply_to_message.caption
+    elif len(message.command) > 1:
+        text_to_translate = ' '.join(message.command[1:])
+    if not text_to_translate: return await message.edit("❌ **متنی برای ترجمه یافت نشد**")
+    loading_msg = await message.edit("🔄 **در حال ترجمه...**")
+    try:
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=fa&dt=t&q={urllib.parse.quote(text_to_translate)}"
+        resp = requests.get(url).json()
+        translated = "".join([s[0] for s in resp[0]])
+        await loading_msg.edit(f"🌐 **ترجمه:**\n\n{translated}")
+    except Exception as e:
+        await loading_msg.edit(f"❌ **خطا در ترجمه:** `{e}`")
+
+@app.on_message(filters.me & filters.command("آب و هوا", prefixes=""))
+async def weather_cmd(client, message):
+    if len(message.command) < 2: return await message.edit("❌ **استفاده:** `آب و هوا تهران`")
+    city = ' '.join(message.command[1:])
+    loading_msg = await message.edit(f"🌤 **در حال دریافت آب و هوای {city}...**")
+    try:
+        resp = requests.get(f"https://wttr.in/{city}?format=%l:+%c+%t+%h+%w").text
+        await loading_msg.edit(f"🌤 **آب و هوا**\n\n📍 {resp}")
+    except Exception as e:
+        await loading_msg.edit(f"❌ **خطا:** `{e}`")
+
+@app.on_message(filters.me & filters.command("بارکد", prefixes=""))
+async def qr_code(client, message):
+    if len(message.command) < 2: return await message.edit("❌ **استفاده:** `بارکد متن`")
+    text = ' '.join(message.command[1:])
+    loading_msg = await message.edit("🎨 **در حال ساخت بارکد...**")
+    try:
+        url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(text)}"
+        resp = requests.get(url)
+        if resp.status_code == 200:
+            with open("qr.png", "wb") as f: f.write(resp.content)
+            await client.send_photo(message.chat.id, "qr.png", caption=f"✅ **بارکد شما:**\n`{text}`")
+            os.remove("qr.png")
+            await loading_msg.delete()
+        else: await loading_msg.edit("❌ **خطا در ساخت بارکد**")
+    except Exception as e:
+        await loading_msg.edit(f"❌ **خطا:** `{e}`")
+
+@app.on_message(filters.me & filters.command("شنود", prefixes="") & filters.regex(r"^شنود (روشن|خاموش)$"))
+async def tag_logger(client, message):
+    global tag_logger_on
+    action = message.matches[0].group(1)
+    if action == "روشن":
+        tag_logger_on = True
+        await message.edit("✅ **سیستم شنود روشن شد**\nشما از تگ شدن در گروه‌ها مطلع خواهید شد.")
+    else:
+        tag_logger_on = False
+        await message.edit("❌ **سیستم شنود خاموش شد**")
+
+@app.on_message(filters.me & filters.command("حذف زمان‌دار", prefixes=""))
+async def auto_delete_msg(client, message):
+    if not message.reply_to_message or len(message.command) < 2:
+        return await message.edit("❌ **روی پیام ریپلای کنید و تایم بدهید**\nمثال: `حذف زمان‌دار 10`")
+    try:
+        seconds = int(message.command[1])
+        await message.delete()
+        msg_to_del = message.reply_to_message
+        await asyncio.sleep(seconds)
+        await msg_to_del.delete()
+    except: pass
+
+@app.on_message(filters.me & filters.command("پاکسازی", prefixes=""))
+async def clear_chat_history(client, message):
+    await message.edit("🗑 **در حال پاک کردن تاریخچه چت...**")
+    try:
+        async for msg in client.get_chat_history(message.chat.id):
+            try:
+                await msg.delete()
+                await asyncio.sleep(0.2)
+            except: pass
+    except Exception as e:
+        await message.edit(f"❌ **خطا:** `{e}`")
+
 @app.on_message(filters.me & filters.command(["پنل", "panel"], prefixes=""))
 async def panel_command(client, message: Message):
     loading_msg = await message.edit_text("⏳ **در حال ارتباط با ربات هلپر...**")
