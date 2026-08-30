@@ -39,9 +39,9 @@ FORCE_CHANNELS = [
 COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
 TOMAN_PER_COIN = 50000 / 1440
 card_info = {
-    "card_number": "6037-1234-1234-1234",
-    "card_owner": "نام صاحب کارت",
-    "bank_name": "نام بانک"
+    "card_number": "6277601405245190",
+    "card_owner":  "زارعان",
+    "bank_name": "پست بانک"
 }
 
 bot = Client("bot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
