@@ -497,6 +497,7 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "<b>🎛 پنل مدیریت سلف</b>\n\n💡 <i>صفحه اول - 10 قابلیت اصلی</i>"
     await update.message.reply_text(text, reply_markup=get_main_menu_page1(user_id), parse_mode='HTML')
 
+# ✅ هندلر اینلاین بهینه شده برای جلوگیری از تایم‌اوت
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip().lower()
     
@@ -526,6 +527,9 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         ]
         await update.inline_query.answer(results, cache_time=300, is_personal=True)
+    else:
+        # پاسخ خالی به کوئری‌های دیگر برای جلوگیری از تایم‌اوت تلگرام
+        await update.inline_query.answer([], cache_time=10)
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -548,7 +552,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("داده نامعتبر!", show_alert=True)
         return
     
-    print(f"Debug: action={action}, page={page_num}, data={data}")  # برای دیباگ
     if action == "close":
         text = "✅ <b>پنل بسته شد</b>\n\n💡 برای باز کردن مجدد:\n<code>@BotUsername panel</code>"
         await query.edit_message_text(text, reply_markup=get_reopen_button(user_id), parse_mode='HTML')
