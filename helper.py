@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQ
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, InlineQueryHandler, MessageHandler, filters
 import logging
 
-TOKEN = "8887093613:AAFkqOtkanU7E0qM4ArE8iQeOTBX4EtA9vU" # توکن ربات هلپر
+TOKEN = "8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis" # توکن ربات هلپر
 
 # توجه برای اینکه هلپر کار کنه بابد بخش اینلاین مود ربات رو توی بات فادر فعال کنید
 
