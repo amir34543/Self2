@@ -18,7 +18,7 @@ async def safe_edit_message(message, *args, **kwargs):
 
 user_temp_codes = {}
 active_clients = {}
-BOT_TOKEN = "8876742932:AAHkfGQMsNEDH_bSQemz5p4NLdMtJOTOiTM"
+BOT_TOKEN = "8868043854:AAHblyKRa-DbGHefUp7q8_Zw675JTfBdgBw"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 ADMIN_ID = 7845464086
