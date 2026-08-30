@@ -1,111 +1,110 @@
-from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent
+from pyrogram import Client, enums
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent, KeyboardButtonStyle
 import logging
 
-TOKEN = "8887093613:AAFkqOtkanU7E0qM4ArE8iQeOTBX4EtA9vU" # توکن ربات هلپر
+TOKEN = "8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis" # توکن ربات هلپر
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = Client("helper_bot", bot_token=TOKEN, api_id=API_ID, api_hash=API_HASH)
 
 HELP_TEXTS = {
-    "time": "⏰ <b>مدیریت تایم</b>\n\n<b>دستورات قابل کپی:</b>\n<code>تایم روشن</code>\n<code>تایم خاموش</code>\n\n<b>کاربرد:</b>\nنمایش زمان کنار نام کاربری",
+    "time": "⏰ <b>مدیریت تایم</b>\n\n<b>دستورات قابل کپی:</b>\n<code>تایم روشن</code>\n<code>تایم خاموش</code>",
     "instagram": "📥 <b>دانلودر اینستاگرام</b>\n\n<b>دستور قابل کپی:</b>\n<code>اینستا لینک_پست</code>",
     "id": "🆔 <b>سیستم آیدی پیشرفته</b>\n\n<b>دستور قابل کپی:</b>\n<code>ایدی</code>",
-    "photo": "📸 <b>ذخیره عکس تایمدار</b>\n\n<b>دستور قابل کپی:</b>\n<code>عکس سیو</code> (ریپلای روی عکس)",
+    "photo": "📸 <b>ذخیره عکس تایمدار</b>\n\n<b>دستور قابل کپی:</b>\n<code>عکس سیو</code>",
     "backup": "💾 <b>پشتیبان‌گیری</b>\n\n<b>دستور قابل کپی:</b>\n<code>سیو @یوزرنیم</code>",
-    "font": "🔤 <b>مدیریت فونت</b>\n\n<b>دستورات قابل کپی:</b>\n<code>لیست فونت</code>\n<code>تنظیم فونت 1</code> تا <code>6</code>",
+    "font": "🔤 <b>مدیریت فونت</b>\n\n<b>دستورات قابل کپی:</b>\n<code>لیست فونت</code>\n<code>تنظیم فونت 1</code>",
     "price": "💱 <b>قیمت ارز</b>\n\n<b>دستور قابل کپی:</b>\n<code>قیمت BTC</code>",
     "spam": "🔁 <b>ارسال اسپم</b>\n\n<b>دستور قابل کپی:</b>\n<code>اسپم 10 سلام</code>",
-    "format": "🎨 <b>سیستم فرمت خودکار HTML</b>\n\n<b>دستورات:</b>\n<code>فرمت بولد روشن</code>\n<code>فرمت ریست</code>",
-    "enemy": "👿 <b>مدیریت دشمنان</b>\n\n<b>دستورات:</b>\n<code>دشمن</code> (ریپلای)\n<code>لیست دشمن</code>",
-    "autoreply": "🤖 <b>پاسخ خودکار</b>\n\n<b>دستورات:</b>\n<code>پاسخ افزودن سلام|سلام چطوری</code>",
-    "insult": "💢 <b>مدیریت فحش‌ها</b>\n\n<b>دستورات:</b>\n<code>فحش افزودن [متن]</code>",
-    "online": "🌐 <b>حالت همیشه آنلاین</b>\n\n<b>دستورات:</b>\n<code>آنلاین روشن</code>",
-    "lock": "🔒 <b>سیستم قفل پیوی</b>\n\n<b>دستورات:</b>\n<code>همه روشن</code>\n<code>مدیا روشن</code>",
-    "antilogin": "🛡️ <b>سیستم انتی لاگین</b>\n\n<b>دستورات:</b>\n<code>انتی لاگین روشن</code>",
-    "reaction": "🎭 <b>سیستم ریکشن خودکار</b>\n\n<b>دستورات:</b>\n<code>ریکت 😊</code> (ریپلای)",
-    "edit": "✏️ <b>ویرایش سریع پیام</b>\n\n<b>دستور:</b>\n<code>ویرایش کلمه_قدیمی به کلمه_جدید</code>",
-    "banner": "📢 <b>سیستم مدیریت بنر</b>\n\n<b>دستورات:</b>\n<code>تنظیم بنر</code>\n<code>بنر همگانی 1</code>",
-    "download": "📥 <b>دانلودر تلگرام</b>\n\n<b>دستور:</b>\n<code>دانلود https://t.me/channel/123</code>",
+    "format": "🎨 <b>سیستم فرمت خودکار HTML</b>\n\n<code>فرمت بولد روشن</code>",
+    "enemy": "👿 <b>مدیریت دشمنان</b>\n\n<code>دشمن</code> (ریپلای)\n<code>لیست دشمن</code>",
+    "autoreply": "🤖 <b>پاسخ خودکار</b>\n\n<code>پاسخ افزودن سلام|سلام چطوری</code>",
+    "insult": "💢 <b>مدیریت فحش‌ها</b>\n\n<code>فحش افزودن [متن]</code>",
+    "online": "🌐 <b>حالت همیشه آنلاین</b>\n\n<code>آنلاین روشن</code>",
+    "lock": "🔒 <b>سیستم قفل پیوی</b>\n\n<code>همه روشن</code>\n<code>مدیا روشن</code>",
+    "antilogin": "🛡️ <b>سیستم انتی لاگین</b>\n\n<code>انتی لاگین روشن</code>",
+    "reaction": "🎭 <b>سیستم ریکشن خودکار</b>\n\n<code>ریکت 😊</code> (ریپلای)",
+    "edit": "✏️ <b>ویرایش سریع پیام</b>\n\n<code>ویرایش کلمه_قدیمی به کلمه_جدید</code>",
+    "banner": "📢 <b>سیستم مدیریت بنر</b>\n\n<code>تنظیم بنر</code>\n<code>بنر همگانی 1</code>",
+    "download": "📥 <b>دانلودر تلگرام</b>\n\n<code>دانلود https://t.me/channel/123</code>",
     "new": "🆕 <b>دستورات گروه/کانال</b>\n\n<code>پینگ</code>\n<code>تعداد کانال ها</code>",
 }
 
 def get_main_menu_page1(user_id):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("● ایدی ●", callback_data=f"help_id_{user_id}_1", style="primary"),
-            InlineKeyboardButton("● تایم ●", callback_data=f"help_time_{user_id}_1", style="primary")
+            InlineKeyboardButton("● ایدی ●", callback_data=f"help_id_{user_id}_1", style=KeyboardButtonStyle(bg_primary=True)),
+            InlineKeyboardButton("● تایم ●", callback_data=f"help_time_{user_id}_1", style=KeyboardButtonStyle(bg_primary=True))
         ],
         [
-            InlineKeyboardButton("● عکس تایمدار ●", callback_data=f"help_photo_{user_id}_1", style="primary"),
+            InlineKeyboardButton("● عکس تایمدار ●", callback_data=f"help_photo_{user_id}_1", style=KeyboardButtonStyle(bg_primary=True)),
         ],
         [
-            InlineKeyboardButton("● پشتیبان‌گیری ●", callback_data=f"help_backup_{user_id}_1", style="success"),
-            InlineKeyboardButton("● مدیریت فونت ●", callback_data=f"help_font_{user_id}_1", style="success")
+            InlineKeyboardButton("● پشتیبان‌گیری ●", callback_data=f"help_backup_{user_id}_1", style=KeyboardButtonStyle(bg_success=True)),
+            InlineKeyboardButton("● مدیریت فونت ●", callback_data=f"help_font_{user_id}_1", style=KeyboardButtonStyle(bg_success=True))
         ],
         [
-            InlineKeyboardButton("● قیمت ارز ●", callback_data=f"help_price_{user_id}_1", style="success"),
+            InlineKeyboardButton("● قیمت ارز ●", callback_data=f"help_price_{user_id}_1", style=KeyboardButtonStyle(bg_success=True)),
         ],
         [
-            InlineKeyboardButton("● فرمت متن ●", callback_data=f"help_format_{user_id}_1", style="danger"),
-            InlineKeyboardButton("● اسپم ●", callback_data=f"help_spam_{user_id}_1", style="danger")
+            InlineKeyboardButton("● فرمت متن ●", callback_data=f"help_format_{user_id}_1", style=KeyboardButtonStyle(bg_danger=True)),
+            InlineKeyboardButton("● اسپم ●", callback_data=f"help_spam_{user_id}_1", style=KeyboardButtonStyle(bg_danger=True))
         ],
         [
-            InlineKeyboardButton("● مدیریت دشمنان ●", callback_data=f"help_enemy_{user_id}_1", style="danger"),
+            InlineKeyboardButton("● مدیریت دشمنان ●", callback_data=f"help_enemy_{user_id}_1", style=KeyboardButtonStyle(bg_danger=True)),
         ],
         [
-            InlineKeyboardButton("● پاسخ خودکار ●", callback_data=f"help_autoreply_{user_id}_1", style="primary"),
+            InlineKeyboardButton("● پاسخ خودکار ●", callback_data=f"help_autoreply_{user_id}_1", style=KeyboardButtonStyle(bg_primary=True)),
         ],
         [
-            InlineKeyboardButton("● صفحه 2 → ●", callback_data=f"help_page2_{user_id}", style="success"),
-            InlineKeyboardButton("● بست ●", callback_data=f"help_close_{user_id}", style="danger")
+            InlineKeyboardButton("● صفحه 2 → ●", callback_data=f"help_page2_{user_id}", style=KeyboardButtonStyle(bg_success=True)),
+            InlineKeyboardButton("● بست ●", callback_data=f"help_close_{user_id}", style=KeyboardButtonStyle(bg_danger=True))
         ]
     ])
 
 def get_main_menu_page2(user_id):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("● سیستم فحش ●", callback_data=f"help_insult_{user_id}_2", style="danger"),
-            InlineKeyboardButton("● همیشه آنلاین ●", callback_data=f"help_online_{user_id}_2", style="danger")
+            InlineKeyboardButton("● سیستم فحش ●", callback_data=f"help_insult_{user_id}_2", style=KeyboardButtonStyle(bg_danger=True)),
+            InlineKeyboardButton("● همیشه آنلاین ●", callback_data=f"help_online_{user_id}_2", style=KeyboardButtonStyle(bg_danger=True))
         ],
         [
-            InlineKeyboardButton("● قفل پیوی ●", callback_data=f"help_lock_{user_id}_2", style="danger"),
+            InlineKeyboardButton("● قفل پیوی ●", callback_data=f"help_lock_{user_id}_2", style=KeyboardButtonStyle(bg_danger=True)),
         ],
         [
-            InlineKeyboardButton("●️ انتی لاگین ●", callback_data=f"help_antilogin_{user_id}_2", style="primary"),
-            InlineKeyboardButton("● ریکشن خودکار ●", callback_data=f"help_reaction_{user_id}_2", style="primary")
+            InlineKeyboardButton("●️ انتی لاگین ●", callback_data=f"help_antilogin_{user_id}_2", style=KeyboardButtonStyle(bg_primary=True)),
+            InlineKeyboardButton("● ریکشن خودکار ●", callback_data=f"help_reaction_{user_id}_2", style=KeyboardButtonStyle(bg_primary=True))
         ],
         [
-            InlineKeyboardButton("● ویرایش سریع ●", callback_data=f"help_edit_{user_id}_2", style="primary"),
+            InlineKeyboardButton("● ویرایش سریع ●", callback_data=f"help_edit_{user_id}_2", style=KeyboardButtonStyle(bg_primary=True)),
         ],
         [
-            InlineKeyboardButton("● سیستم بنر ●", callback_data=f"help_banner_{user_id}_2", style="success"),
-            InlineKeyboardButton("● اینستاگرام ●", callback_data=f"help_instagram_{user_id}_2", style="success")
+            InlineKeyboardButton("● سیستم بنر ●", callback_data=f"help_banner_{user_id}_2", style=KeyboardButtonStyle(bg_success=True)),
+            InlineKeyboardButton("● اینستاگرام ●", callback_data=f"help_instagram_{user_id}_2", style=KeyboardButtonStyle(bg_success=True))
         ],
         [
-            InlineKeyboardButton("● دانلود تلگرام ●", callback_data=f"help_download_{user_id}_2", style="success"),
+            InlineKeyboardButton("● دانلود تلگرام ●", callback_data=f"help_download_{user_id}_2", style=KeyboardButtonStyle(bg_success=True)),
         ],
         [
-            InlineKeyboardButton("● مدیریت گروه/کانال ●", callback_data=f"help_new_{user_id}_2", style="primary"),
+            InlineKeyboardButton("● مدیریت گروه/کانال ●", callback_data=f"help_new_{user_id}_2", style=KeyboardButtonStyle(bg_primary=True)),
         ],
         [
-            InlineKeyboardButton("← صفحه 1", callback_data=f"help_page1_{user_id}", style="primary"),
-            InlineKeyboardButton("❌ بستن", callback_data=f"help_close_{user_id}", style="danger")
+            InlineKeyboardButton("← صفحه 1", callback_data=f"help_page1_{user_id}", style=KeyboardButtonStyle(bg_primary=True)),
+            InlineKeyboardButton("❌ بستن", callback_data=f"help_close_{user_id}", style=KeyboardButtonStyle(bg_danger=True))
         ]
     ])
 
 def get_back_button(user_id, from_page=1):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 بازگشت", callback_data=f"help_back_{user_id}_{from_page}", style="primary")]
+        [InlineKeyboardButton("🔙 بازگشت", callback_data=f"help_back_{user_id}_{from_page}", style=KeyboardButtonStyle(bg_primary=True))]
     ])
 
 def get_reopen_button(user_id):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 بازکردن پنل", callback_data=f"help_reopen_{user_id}", style="success")]
+        [InlineKeyboardButton("🔄 بازکردن پنل", callback_data=f"help_reopen_{user_id}", style=KeyboardButtonStyle(bg_success=True))]
     ])
 
 @app.on_inline_query()
