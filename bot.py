@@ -2,7 +2,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
 import json, os, asyncio, subprocess, sys, time, threading, random
-import html
+import html, re
 from pyrogram import enums
 
 # برای پهن‌تر شدن حباب پیام و در نتیجه کشیده‌تر شدن دکمه‌های اینلاین
@@ -19,8 +19,6 @@ async def safe_edit_message(message, *args, **kwargs):
 user_temp_codes = {}
 active_clients = {}
 BOT_TOKEN = "8868043854:AAHblyKRa-DbGHefUp7q8_Zw675JTfBdgBw"
-API_ID = 35656061
-API_HASH = "b37f2596516bc0439bf505d1d230395c"
 ADMIN_ID = 7845464086
 
 # تنظیمات منوی جدید
@@ -44,7 +42,16 @@ card_info = {
     "bank_name": "نام بانک"
 }
 
-bot = Client("bot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
+# ===== سیستم چند API_ID برای جلوگیری از محدودیت تلگرام =====
+API_CREDENTIALS = [
+    {"api_id": 35656061, "api_hash": "b37f2596516bc0439bf505d1d230395c"},
+    {"api_id": 33452325, "api_hash": "57df08761ce14c556f3f0a7d09304246"}
+]
+
+def get_random_api():
+    return random.choice(API_CREDENTIALS)
+
+bot = Client("bot", bot_token=BOT_TOKEN, api_id=API_CREDENTIALS[0]["api_id"], api_hash=API_CREDENTIALS[0]["api_hash"])
 
 # ===== مدیریت عکس شرط و دوز (متغیرهای سراسری) =====
 admin_photo_wait = set()
@@ -94,10 +101,14 @@ class JSONDatabase:
         try:
             if data: 
                 self.data = data
-            with open(self.filename, 'w', encoding='utf-8') as f:
+            # استفاده از فایل موقت برای جلوگیری از قفل شدن دیتابیس (database is locked)
+            temp_filename = f"{self.filename}.tmp"
+            with open(temp_filename, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, indent=4, ensure_ascii=False)
+            os.replace(temp_filename, self.filename)
             return True
         except Exception as e:
+            print(f"❌ خطا در ذخیره دیتابیس: {e}")
             return False
     
     def get(self, category, key, default=None):
@@ -123,6 +134,7 @@ class JSONDatabase:
             return False
         except Exception as e:
             return False  
+    
     def get_all(self, category):
         try:
             return self.data.get(category, {})
@@ -135,7 +147,6 @@ class JSONDatabase:
             return {k: v for k, v in payments.items() if v.get('status') == 'pending'}
         except:
             return {}
-    
 
 db = JSONDatabase()
 user_timers = {}
@@ -253,7 +264,7 @@ async def handle_code_from_keyboard(client, code_message):
             user_client = active_clients[user_id]
         else:
             session_name = f"sessions/{user_id}"
-            user_client = Client(session_name, api_id=API_ID, api_hash=API_HASH)
+            user_client = Client(session_name, api_id=temp_data["api_id"], api_hash=temp_data["api_hash"])
             await user_client.connect()
             active_clients[user_id] = user_client
         
@@ -273,6 +284,8 @@ async def handle_code_from_keyboard(client, code_message):
             "status": "active", 
             "created_at": time.time(),
             "last_active": time.time(),
+            "api_id": temp_data["api_id"],
+            "api_hash": temp_data["api_hash"]
         }
         db.set("users", user_id, user_info)
         db.delete("temp_data", user_id)
@@ -283,6 +296,9 @@ async def handle_code_from_keyboard(client, code_message):
                 del active_clients[user_id]
             except:
                 pass
+
+        # تاخیر برای آزاد شدن کامل فایل سشن
+        await asyncio.sleep(1)
 
         if run_selfbot(user_id, temp_data["phone"]):
             credits = db.get("credits", user_id, 0)
@@ -536,11 +552,14 @@ def deduct_credit_callback(user_id):
 def run_selfbot(user_id, phone=None):
     try:
         stop_selfbot(user_id)
+        user_data = db.get("users", user_id, {})
+        user_api_id = user_data.get("api_id", API_CREDENTIALS[0]["api_id"])
+        user_api_hash = user_data.get("api_hash", API_CREDENTIALS[0]["api_hash"])
 
         if phone:
-            cmd = [sys.executable, "self.py", str(user_id), phone, str(API_ID), API_HASH]
+            cmd = [sys.executable, "self.py", str(user_id), phone, str(user_api_id), user_api_hash]
         else:
-            cmd = [sys.executable, "self.py", str(user_id)]
+            cmd = [sys.executable, "self.py", str(user_id), str(user_api_id), user_api_hash]
         
         process = subprocess.Popen(cmd)
         pid = process.pid
@@ -550,16 +569,10 @@ def run_selfbot(user_id, phone=None):
         with open(f"process_{user_id}.pid", "w") as f:
             f.write(str(pid))
         
-        print(f"✅ سلف‌بات برای کاربر {user_id} راه‌اندازی شد")
-        print(f"   📱 شماره: {phone}")
-        print(f"   🆔 PID: {pid}")
-        print(f"   💰 سکه: {db.get('credits', user_id, 0)}")
-        print("-" * 50)
-        
+        print(f"✅ سلف‌بات برای کاربر {user_id} راه‌اندازی شد | PID: {pid}")
         if user_id not in user_timers:
             user_timers[user_id] = UserTimer(user_id, deduct_credit_callback)
         user_timers[user_id].start()
-        
         return True
     except Exception as e:
         print(f"❌ خطا در اجرای سلف‌بات: {e}")
@@ -588,10 +601,7 @@ def stop_selfbot(user_id):
                     pass
                 try:
                     import subprocess
-                    subprocess.run(["pkill", "-f", f"self.py {user_id}"], 
-                                 capture_output=True, check=False)
-                    subprocess.run(["pkill", "-f", "self.py"], 
-                                 capture_output=True, check=False)
+                    subprocess.run(["pkill", "-f", f"self.py {user_id}"], capture_output=True, check=False)
                 except:
                     pass
                 
@@ -612,16 +622,6 @@ def stop_selfbot(user_id):
             print(f"✅ سلف‌بات کاربر {user_id} قطع شد (PID: {pid})")
             return True
         
-        try:
-            import subprocess
-            subprocess.run(["pkill", "-f", f"self.py {user_id}"], check=False)
-            subprocess.run(["pkill", "-f", "self.py"], check=False)
-            db.delete("processes", user_id)
-            print(f"✅ سلف‌بات کاربر {user_id} قطع شد (از طریق pkill)")
-            return True
-        except:
-            pass
-            
         return False
     except Exception as e:
         print(f"❌ خطا در stop_selfbot: {e}")
@@ -713,14 +713,11 @@ async def set_credits(client, message: Message):
         target_id = int(message.command[1])
         amount = int(message.command[2])
         db.set("credits", target_id, amount)
-        
         await message.reply_text(f"✅ سکه کاربر {target_id} تنظیم شد به {amount}")
-        
         try:
             await bot.send_message(target_id, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
         except: 
             pass
-        
     except: 
         await message.reply_text("❌ آیدی/تعداد باید عدد باشد")
 
@@ -728,75 +725,41 @@ async def set_credits(client, message: Message):
 async def group_bet_handler(client, message: Message):
     chat_id = message.chat.id
     creator_id = message.from_user.id
-
-    try:
-        amount = int(message.matches[0].group(1))
-    except:
-        return
-
+    try: amount = int(message.matches[0].group(1))
+    except: return
     if amount <= 0:
         await message.reply_text("❌ مقدار شرط باید بیشتر از صفر باشد.")
         return
     creator_credits = db.get("credits", creator_id, 0)
     if creator_credits < amount:
-        await message.reply_text(
-            f"❌ سکه کافی برای ساخت شرط ندارید.\n"
-            f"💰 موجودی شما: {creator_credits} سکه"
-        )
+        await message.reply_text(f"❌ سکه کافی برای ساخت شرط ندارید.\n💰 موجودی شما: {creator_credits} سکه")
         return
     db.set("credits", creator_id, creator_credits - amount)
     creator_first_name = html.escape(message.from_user.first_name or 'کاربر')
     creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
-
     bet_text = (
-        "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>\n"
-        "<b>𝐕𝐈𝐏</b> | شرطبندی :\n"
-        f"<b>𝐕𝐈𝐏</b> | {amount:,} الماس\n"
-        f"<b>𝐕𝐈𝐏</b> | سازنده: {creator_mention}\n"
-        "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>"
+        "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>\n<b>𝐕𝐈𝐏</b> | شرطبندی :\n"
+        f"<b>𝐕𝐈𝐏</b> | {amount:,} الماس\n<b>𝐕𝐈𝐏</b> | سازنده: {creator_mention}\n<b>◈ ━ selfisaz PersianGulf ━ ◈</b>"
     )
-
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("◈ ━ پیوستن ━ ◈", callback_data=f"joinbet_waiting", style=KeyboardButtonStyle(bg_success=True)),
             InlineKeyboardButton("❌ لغو", callback_data=f"cancelbet_waiting", style=KeyboardButtonStyle(bg_danger=True))
         ]
     ])
-
     bet_image = db.data.get("bet_doz_image")
     if bet_image:
-        bet_msg = await message.reply_photo(
-            photo=bet_image,
-            caption=bet_text,
-            reply_markup=keyboard,
-            parse_mode=enums.ParseMode.HTML
-        )
+        bet_msg = await message.reply_photo(photo=bet_image, caption=bet_text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
     else:
-        bet_msg = await message.reply_text(
-            bet_text,
-            reply_markup=keyboard,
-            parse_mode=enums.ParseMode.HTML
-        )
-
+        bet_msg = await message.reply_text(bet_text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
     bet_key = f"{chat_id}_{bet_msg.id}"
-
     bet_data = {
-        "chat_id": chat_id,
-        "message_id": bet_msg.id,
-        "amount": amount,
-        "creator_id": creator_id,
-        "creator_name": message.from_user.first_name or "",
-        "creator_username": message.from_user.username or "",
-        "participants": [],
-        "is_active": True,
-        "finished": False,
-        "timer_started": False,
-        "created_at": time.time(),
-        "refunded": False
+        "chat_id": chat_id, "message_id": bet_msg.id, "amount": amount, "creator_id": creator_id,
+        "creator_name": message.from_user.first_name or "", "creator_username": message.from_user.username or "",
+        "participants": [], "is_active": True, "finished": False, "timer_started": False,
+        "created_at": time.time(), "refunded": False
     }
-
     db.set("group_bets", bet_key, bet_data)
-    
     try:
         new_keyboard = InlineKeyboardMarkup([
             [
@@ -805,9 +768,7 @@ async def group_bet_handler(client, message: Message):
             ]
         ])
         await bet_msg.edit_reply_markup(new_keyboard)
-    except Exception as e:
-        print(f"Error updating keyboard: {e}")
-        
+    except: pass
     asyncio.create_task(cancel_group_bet_if_no_joiner(client, bet_key))
 
 @bot.on_message(filters.command("user") & filters.user(ADMIN_ID))
@@ -815,51 +776,37 @@ async def user_info(client, message: Message):
     if len(message.command) != 2:
         await message.reply_text("❌ فرمت: `/user آیدی`")
         return
-    
     try:
         target_id = int(message.command[1])
         user_data = db.get("users", target_id, {})
         credits = db.get("credits", target_id, 0)
         process = db.get("processes", target_id)
         timer = db.get("timers", target_id)
-        
         if not user_data:
             await message.reply_text("❌ کاربر یافت نشد")
             return
-        
         status = "🟢 فعال" if user_data.get('status') == 'active' else "🔴 غیرفعال"
         phone = user_data.get('phone', '❌ ثبت نشده')
         created = time.ctime(user_data.get('created_at', time.time()))
         running = "🟢 بله" if process else "🔴 خیر"
         has_timer = "🟢 فعال" if timer and timer.get('is_running') else "🔴 غیرفعال"
-        
         created_time = user_data.get('created_at', time.time())
         time_diff = time.time() - created_time
-        days = int(time_diff // 86400)
-        hours = int((time_diff % 86400) // 3600)
-        
+        days = int(time_diff // 86400); hours = int((time_diff % 86400) // 3600)
         info_text = f"""
 👤 **اطلاعات کاربر {target_id}**
-
 📱 **شماره:** `{phone}`
 📊 **وضعیت:** {status}
 💰 **سکه ها:** `{credits}`
 🔄 **سلف:** {running}
 📅 **تاریخ ایجاد:** `{created}`
 ⏳ **عضو شده:** {days} روز و {hours} ساعت
-
 ⏱ **زمان باقی‌مانده:** `{credits}` ساعت
 💸 **مصرف سکه:** 1 سکه در ساعت
 """
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎯 تنظیم سکه", callback_data=f"set_{target_id}"),
-             InlineKeyboardButton("🛑 توقف سلف", callback_data=f"stop_{target_id}")]
-        ])
-        
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🎯 تنظیم سکه", callback_data=f"set_{target_id}"), InlineKeyboardButton("🛑 توقف سلف", callback_data=f"stop_{target_id}")]])
         await message.reply_text(info_text, reply_markup=keyboard)
-        
-    except: 
-        await message.reply_text("❌ آیدی باید عدد باشد")
+    except: await message.reply_text("❌ آیدی باید عدد باشد")
 
 @bot.on_message(filters.command("admin") & filters.user(ADMIN_ID))
 async def admin_panel(client, message: Message):
@@ -869,22 +816,16 @@ async def admin_panel(client, message: Message):
     pending_payments = len(db.get_pending_payments())
     today = time.time() - 86400
     new_today = sum(1 for user_data in users.values() if user_data.get("created_at", 0) > today)
-
     stats_text = (
         "🛠 **پنل مدیریت ادمین**\n\n"
-        f"👥 **کل کاربران:** `{len(users)}`\n"
-        f"🟢 **کاربران فعال:** `{active_count}`\n"
-        f"🆕 **کاربران امروز:** `{new_today}`\n"
-        f"💰 **مجموع سکه ها:** `{total_credits}`\n\n"
+        f"👥 **کل کاربران:** `{len(users)}`\n🟢 **کاربران فعال:** `{active_count}`\n"
+        f"🆕 **کاربران امروز:** `{new_today}`\n💰 **مجموع سکه ها:** `{total_credits}`\n\n"
         f"📋 **درخواست‌های در انتظار:**\n└─ 💰 پرداخت: `{pending_payments}`\n"
     )
-
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🖼 مدیریت عکس شرط و دوز", callback_data="ADMIN_PHOTO_PANEL", style=KeyboardButtonStyle(bg_primary=True))],
-        [InlineKeyboardButton("👥 لیست کاربران", callback_data="admin_list"),
-         InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
-        [InlineKeyboardButton("💰 برترین کاربران", callback_data="admin_top"),
-         InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
+        [InlineKeyboardButton("👥 لیست کاربران", callback_data="admin_list"), InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
+        [InlineKeyboardButton("💰 برترین کاربران", callback_data="admin_top"), InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
         [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
         [InlineKeyboardButton("🪙 سکه همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))]
     ])
@@ -895,198 +836,107 @@ async def numpad_callback(client, callback_query):
     user_id = callback_query.from_user.id
     data = callback_query.data
     current_code = user_temp_codes.get(user_id, "")
-    
     if data == "code_clear":
         user_temp_codes[user_id] = current_code[:-1]
         display_code = user_temp_codes[user_id]
-
         formatted = format_code_display(display_code)
-        
-        try:
-            await safe_edit_message(callback_query.message, 
-                f"🔢 **کد تایید را وارد کنید:**\n\n"
-                f"<b><code>{formatted}</code></b>\n\n"
-                f"📱 کد {len(display_code)}/5 رقم وارد شد",
-                reply_markup=create_numpad_keyboard(),
-                parse_mode=enums.ParseMode.HTML
-            )
-        except Exception as e:
-            print(f"❌ خطا در ویرایش پیام: {e}")
-        
+        try: await safe_edit_message(callback_query.message, f"🔢 **کد تایید را وارد کنید:**\n\n<b><code>{formatted}</code></b>\n\n📱 کد {len(display_code)}/5 رقم وارد شد", reply_markup=create_numpad_keyboard(), parse_mode=enums.ParseMode.HTML)
+        except: pass
         await callback_query.answer()
-        
     elif data == "code_send":
         if len(current_code) == 5:
             await callback_query.answer("✅ کد ارسال شد...", show_alert=True)
             class FakeMessage:
                 def __init__(self, user_id, code):
                     self.from_user = type('obj', (object,), {'id': user_id})()
-                    self.text = code
-                    self.chat = type('obj', (object,), {'id': user_id})()
-                    self.reply_text = None
-                    
-                async def reply_text(self, text, *args, **kwargs):
-                    await client.send_message(user_id, text, *args, **kwargs)
-            
+                    self.text = code; self.chat = type('obj', (object,), {'id': user_id})(); self.reply_text = None
+                async def reply_text(self, text, *args, **kwargs): await client.send_message(user_id, text, *args, **kwargs)
             fake_msg = FakeMessage(user_id, current_code)
-
             await handle_code_from_keyboard(client, fake_msg)
-            
             user_temp_codes.pop(user_id, None)
-        else:
-            await callback_query.answer(f"❌ کد باید 5 رقم باشد (الان {len(current_code)} رقم)", show_alert=True)
-            
+        else: await callback_query.answer(f"❌ کد باید 5 رقم باشد (الان {len(current_code)} رقم)", show_alert=True)
     elif data == "code_cancel":
         user_temp_codes.pop(user_id, None)
-        try:
-            await safe_edit_message(callback_query.message, 
-                "❌ **ورود کد لغو شد**\n\n"
-                "برای شروع مجدد از /start استفاده کنید",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="back")]
-                ])
-            )
-        except Exception as e:
-            print(f"❌ خطا در ویرایش پیام: {e}")
-        
+        try: await safe_edit_message(callback_query.message, "❌ **ورود کد لغو شد**\n\nبرای شروع مجدد از /start استفاده کنید", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back")]]))
+        except: pass
         await callback_query.answer()
-        
     else:
         number = data.split("_")[1]
-        
         if len(current_code) < 5:
             new_code = current_code + number
             user_temp_codes[user_id] = new_code
             formatted = format_code_display(new_code)
-            
-            try:
-                await safe_edit_message(callback_query.message, 
-                    f"🔢 **کد تایید را وارد کنید:**\n\n"
-                    f"<b><code>{formatted}</code></b>\n\n"
-                    f"📱 کد {len(new_code)}/5 رقم وارد شد",
-                    reply_markup=create_numpad_keyboard(),
-                    parse_mode=enums.ParseMode.HTML
-                )
-            except Exception as e:
-                print(f"❌ خطا در ویرایش پیام: {e}")
-            
+            try: await safe_edit_message(callback_query.message, f"🔢 **کد تایید را وارد کنید:**\n\n<b><code>{formatted}</code></b>\n\n📱 کد {len(new_code)}/5 رقم وارد شد", reply_markup=create_numpad_keyboard(), parse_mode=enums.ParseMode.HTML)
+            except: pass
             await callback_query.answer()
-        else:
-            await callback_query.answer("❌ کد کامل شده است! روی 'ارسال' کلیک کنید", show_alert=True)
+        else: await callback_query.answer("❌ کد کامل شده است! روی 'ارسال' کلیک کنید", show_alert=True)
 
 async def admin_callback_handler(client, callback_query):
-    data = callback_query.data
-    user_id = callback_query.from_user.id
-    
+    data = callback_query.data; user_id = callback_query.from_user.id
     if data == "admin_list":
         users = db.get_all("users")
         if not users:
             await safe_edit_message(callback_query.message, "❌ هیچ کاربری ثبت نشده است.")
             return
-        
         text = "👥 **لیست کاربران:**\n\n"
         for i, (uid, info) in enumerate(list(users.items())[:20], 1):
             credits = db.get("credits", int(uid), 0)
             status = "🟢" if info.get('status') == 'active' else "🔴"
             text += f"{i}. {status} `{uid}` → {credits} سکه\n"
-        
-        if len(users) > 20:
-            text += f"\n... و {len(users) - 20} کاربر دیگر"
-        
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]
-        ])
+        if len(users) > 20: text += f"\n... و {len(users) - 20} کاربر دیگر"
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]])
         await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
         await callback_query.answer()
-    
     elif data == "admin_stats":
-        users = db.get_all("users")
-        processes = db.get_all("processes")
-        credits = db.get_all("credits")
-        payments = db.get_all("payments")
-        
-        total_users = len(users)
-        active_users = len(processes)
-        total_credits = sum(credits.values()) if credits else 0
+        users = db.get_all("users"); processes = db.get_all("processes"); credits = db.get_all("credits"); payments = db.get_all("payments")
+        total_users = len(users); active_users = len(processes); total_credits = sum(credits.values()) if credits else 0
         pending_pay = sum(1 for p in payments.values() if p.get('status') == 'pending')
-        
-        text = f"""
-📊 **آمار کامل سیستم**
-
-👥 **کاربران کل:** {total_users}
-🟢 **فعال:** {active_users}
-💰 **مجموع سکه‌ها:** {total_credits:,}
-
-💳 **درخواست پرداخت:** {pending_pay}
-
-📅 **تاریخ:** {time.ctime()}
-"""
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]
-        ])
+        text = f"📊 **آمار کامل سیستم**\n\n👥 **کاربران کل:** {total_users}\n🟢 **فعال:** {active_users}\n💰 **مجموع سکه‌ها:** {total_credits:,}\n\n💳 **درخواست پرداخت:** {pending_pay}\n\n📅 **تاریخ:** {time.ctime()}"
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]])
         await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
         await callback_query.answer()
-    
     elif data == "admin_top":
         credits = db.get_all("credits")
         if not credits:
             await safe_edit_message(callback_query.message, "❌ هیچ کاربری سکه ندارد.")
             return
-        
         sorted_users = sorted(credits.items(), key=lambda x: x[1], reverse=True)[:10]
         text = "🏆 **برترین کاربران از نظر سکه:**\n\n"
         for i, (uid, amount) in enumerate(sorted_users, 1):
             user_data = db.get("users", int(uid), {})
             name = user_data.get('first_name', 'ناشناس')
             text += f"{i}. {name} → `{amount:,}` سکه\n"
-        
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]
-        ])
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]])
         await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
         await callback_query.answer()
-    
     elif data == "admin_stop_all":
         await safe_edit_message(callback_query.message, "🛑 **در حال توقف همه سلف‌بات‌ها...**")
         stop_all_selfbots()
         await asyncio.sleep(1)
         await safe_edit_message(callback_query.message, "✅ **همه سلف‌بات‌ها متوقف شدند.**")
         await callback_query.answer()
-    
     elif data == "admin_payments":
         payments = db.get_pending_payments()
         if not payments:
             await safe_edit_message(callback_query.message, "❌ هیچ درخواست پرداخت در انتظاری وجود ندارد.")
             return
-        
         text = "💳 **درخواست‌های پرداخت:**\n\n"
         for uid, info in list(payments.items())[:10]:
             name = info.get('first_name', 'ناشناس')
             coins = info.get('coins', 0)
             text += f"👤 {name} → `{uid}` | {coins} سکه\n"
-        
-        if len(payments) > 10:
-            text += f"\n... و {len(payments) - 10} درخواست دیگر"
-        
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]
-        ])
+        if len(payments) > 10: text += f"\n... و {len(payments) - 10} درخواست دیگر"
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")]])
         await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
         await callback_query.answer()
-    
     elif data == "admin_photo_manager":
         if user_id != ADMIN_ID:
             await callback_query.answer("⛔ دسترسی ندارید.", show_alert=True)
             return
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")],
-            [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")],
-            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_back")]
-        ])
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")], [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")], [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_back")]])
         status = "عکس ذخیره شده: ✅ فعال" if db.data.get("bet_doz_image") else "عکس ذخیره شده: ❌ ندارد"
         await safe_edit_message(callback_query.message, f"🖼 **مدیریت عکس شرط و دوز**\n\n{status}", reply_markup=kb)
         await callback_query.answer()
-
     elif data == "set_bet_photo":
         if user_id != ADMIN_ID:
             await callback_query.answer("⛔ دسترسی ندارید.", show_alert=True)
@@ -1094,52 +944,33 @@ async def admin_callback_handler(client, callback_query):
         admin_photo_wait.add(user_id)
         await callback_query.answer("✅ حالا عکس را ارسال کنید.")
         await client.send_message(user_id, "📤 **عکس جدید شرط و دوز را ارسال کنید.**")
-
     elif data == "del_bet_photo":
         if user_id != ADMIN_ID:
             await callback_query.answer("⛔ دسترسی ندارید.", show_alert=True)
             return
         db.data.pop("bet_doz_image", None)
         ok = db.save_data()
-        if ok:
-            await callback_query.answer("✅ عکس حذف شد.", show_alert=True)
-        else:
-            await callback_query.answer("❌ ذخیره تغییرات ناموفق بود.", show_alert=True)
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")],
-            [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")],
-            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_back")]
-        ])
+        if ok: await callback_query.answer("✅ عکس حذف شد.", show_alert=True)
+        else: await callback_query.answer("❌ ذخیره تغییرات ناموفق بود.", show_alert=True)
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="set_bet_photo")], [InlineKeyboardButton("🗑 حذف عکس", callback_data="del_bet_photo")], [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_back")]])
         await safe_edit_message(callback_query.message, "🖼 **مدیریت عکس شرط و دوز**\n\nعکس ذخیره شده: ❌ ندارد", reply_markup=kb)
-
     elif data == "admin_global_coins":
         db.set("temp_data", f"admin_global_coins_{user_id}", True)
         await safe_edit_message(callback_query.message, "🪙 تعداد الماسی که می‌خواهید به همه کاربران اضافه شود را ارسال کنید:")
         await callback_query.answer()
-
     elif data == "admin_back":
         await admin_panel(client, callback_query.message)
         await callback_query.answer()
-    
     elif data.startswith("set_"):
         target_id = int(data.split("_")[1])
         db.set("temp_data", f"admin_set_{user_id}", target_id)
-        await safe_edit_message(callback_query.message, 
-            f"💰 **تعداد سکه جدید برای کاربر {target_id} را وارد کنید:**",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 انصراف", callback_data="admin_back")]
-            ])
-        )
+        await safe_edit_message(callback_query.message, f"💰 **تعداد سکه جدید برای کاربر {target_id} را وارد کنید:**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="admin_back")]]))
         await callback_query.answer()
-    
     elif data.startswith("stop_"):
         target_id = int(data.split("_")[1])
-        if stop_selfbot(target_id):
-            await safe_edit_message(callback_query.message, f"✅ سلف‌بات کاربر {target_id} متوقف شد.")
-        else:
-            await safe_edit_message(callback_query.message, f"ℹ️ سلف‌بات کاربر {target_id} از قبل متوقف بود.")
+        if stop_selfbot(target_id): await safe_edit_message(callback_query.message, f"✅ سلف‌بات کاربر {target_id} متوقف شد.")
+        else: await safe_edit_message(callback_query.message, f"ℹ️ سلف‌بات کاربر {target_id} از قبل متوقف بود.")
         await callback_query.answer()
-    
     elif data.startswith("payment_approve_"):
         target_id = int(data.split("_")[2])
         payment_data = db.get("payments", target_id)
@@ -1149,108 +980,46 @@ async def admin_callback_handler(client, callback_query):
             db.set("credits", target_id, current + coins)
             payment_data["status"] = "approved"
             db.set("payments", target_id, payment_data)
-            
-            await safe_edit_message(callback_query.message, 
-                f"✅ پرداخت کاربر {target_id} تایید شد.\n"
-                f"💰 {coins} سکه به حسابش اضافه شد."
-            )
-            try:
-                await bot.send_message(
-                    target_id,
-                    f"✅ **پرداخت شما تایید شد!**\n\n"
-                    f"💰 {coins} سکه به حساب شما اضافه شد.\n"
-                    f"📊 موجودی جدید: {db.get('credits', target_id, 0)} سکه"
-                )
-            except:
-                pass
-        else:
-            await safe_edit_message(callback_query.message, f"❌ اطلاعات پرداخت کاربر {target_id} یافت نشد.")
+            await safe_edit_message(callback_query.message, f"✅ پرداخت کاربر {target_id} تایید شد.\n💰 {coins} سکه به حسابش اضافه شد.")
+            try: await bot.send_message(target_id, f"✅ **پرداخت شما تایید شد!**\n\n💰 {coins} سکه به حساب شما اضافه شد.\n📊 موجودی جدید: {db.get('credits', target_id, 0)} سکه")
+            except: pass
+        else: await safe_edit_message(callback_query.message, f"❌ اطلاعات پرداخت کاربر {target_id} یافت نشد.")
         await callback_query.answer()
-    
     elif data.startswith("payment_reject_"):
         target_id = int(data.split("_")[2])
         payment_data = db.get("payments", target_id)
         if payment_data:
             payment_data["status"] = "rejected"
             db.set("payments", target_id, payment_data)
-            
             await safe_edit_message(callback_query.message, f"❌ پرداخت کاربر {target_id} رد شد.")
-            try:
-                await bot.send_message(
-                    target_id,
-                    "❌ **پرداخت شما رد شد!**\n\n"
-                    "لطفا مجدداً با ارسال رسید واضح‌تر اقدام کنید."
-                )
-            except:
-                pass
-        else:
-            await safe_edit_message(callback_query.message, f"❌ اطلاعات پرداخت کاربر {target_id} یافت نشد.")
+            try: await bot.send_message(target_id, "❌ **پرداخت شما رد شد!**\n\nلطفا مجدداً با ارسال رسید واضح‌تر اقدام کنید.")
+            except: pass
+        else: await safe_edit_message(callback_query.message, f"❌ اطلاعات پرداخت کاربر {target_id} یافت نشد.")
         await callback_query.answer()
 
 def create_main_menu(user_id):
-    wide = "\u2007" * 8
-    half = "\u2007" * 3
-
+    wide = "\u2007" * 8; half = "\u2007" * 3
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            f"{wide}🛒 خرید سلف{wide}",
-            callback_data="activation_guide",  # تغییر به راهنمای فعالسازی
-            style=KeyboardButtonStyle(bg_success=True)
-        )],
+        [InlineKeyboardButton(f"{wide}🛒 خرید سلف{wide}", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))],
         [
-            InlineKeyboardButton(
-                f"{half}👤 حساب کاربری{half}",
-                callback_data="status_credits",
-                style=KeyboardButtonStyle(bg_primary=True)
-            ),
-            InlineKeyboardButton(
-                f"{half}👥 زیرمجموعه{half}",
-                callback_data="referral",
-                style=KeyboardButtonStyle(bg_success=True)
-            )
+            InlineKeyboardButton(f"{half}👤 حساب کاربری{half}", callback_data="status_credits", style=KeyboardButtonStyle(bg_primary=True)),
+            InlineKeyboardButton(f"{half}👥 زیرمجموعه{half}", callback_data="referral", style=KeyboardButtonStyle(bg_success=True))
         ],
-        [InlineKeyboardButton(
-            f"{wide}⚙️ مدیریت بات ⚙️{wide}",
-            callback_data="self_management",
-            style=KeyboardButtonStyle(bg_primary=True)
-        )],
+        [InlineKeyboardButton(f"{wide}⚙️ مدیریت بات ⚙️{wide}", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))],
         [
-            InlineKeyboardButton(
-                f"{half}• راهنمای خرید •{half}",
-                callback_data="buy_guide",
-                style=KeyboardButtonStyle(bg_primary=True)
-            ),
-            InlineKeyboardButton(
-                f"{half}• خرید الماس •{half}",
-                callback_data="increase_balance",
-                style=KeyboardButtonStyle(bg_success=True)
-            )
+            InlineKeyboardButton(f"{half}• راهنمای خرید •{half}", callback_data="buy_guide", style=KeyboardButtonStyle(bg_primary=True)),
+            InlineKeyboardButton(f"{half}• خرید الماس •{half}", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))
         ],
-        [InlineKeyboardButton(
-            f"{wide}👨‍💻 پشتیبانی 👨‍💻{wide}",
-            callback_data="support",
-            style=KeyboardButtonStyle(bg_success=True)
-        )],
-        [InlineKeyboardButton(
-            f"{wide}📣 چنل ما 📣{wide}",
-            callback_data="buy_channel",
-            style=KeyboardButtonStyle(bg_primary=True)
-        )]
+        [InlineKeyboardButton(f"{wide}👨‍💻 پشتیبانی 👨‍💻{wide}", callback_data="support", style=KeyboardButtonStyle(bg_success=True))],
+        [InlineKeyboardButton(f"{wide}📣 چنل ما 📣{wide}", callback_data="buy_channel", style=KeyboardButtonStyle(bg_primary=True))]
     ])
 
 async def show_main_menu(client, chat_id, user):
     user_id = user.id
-
     existing_user = db.get("users", user_id)
     is_new_user = False
-
     if not existing_user:
-        user_info = {
-            "status": "inactive",
-            "created_at": time.time(),
-            "first_name": user.first_name or "",
-            "username": user.username or ""
-        }
+        user_info = {"status": "inactive", "created_at": time.time(), "first_name": user.first_name or "", "username": user.username or ""}
         db.set("users", user_id, user_info)
         is_new_user = True
     else:
@@ -1258,17 +1027,14 @@ async def show_main_menu(client, chat_id, user):
         user_info["first_name"] = user.first_name or ""
         user_info["username"] = user.username or ""
         db.set("users", user_id, user_info)
-
     credits = db.get("credits", user_id, 0)
     if is_new_user and credits == 0:
         db.set("credits", user_id, 5)
         credits = 5
-
     user_data = db.get("users", user_id, {})
     status = "🟢 فعال" if user_data.get('status') == 'active' else "🔴 غیرفعال"
     phone = user_data.get('phone', '')
     keyboard = create_main_menu(user_id)
-
     welcome_text = f"""**🌺 به ربات سلف ساز خوش آمدید!**
 
 🤖 **ربات مدیریت سلف بات حرفه‌ای**
@@ -1283,7 +1049,6 @@ async def show_main_menu(client, chat_id, user):
 
 💡 برای شروع روی «خرید سلف» کلیک کنید.
 {MENU_WIDTH_PAD}"""
-
     await client.send_message(chat_id, welcome_text, reply_markup=keyboard)
 
 @bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_PANEL$"))
@@ -1292,15 +1057,8 @@ async def admin_photo_panel_handler(client, callback_query):
         await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
         return
     status = "✅ فعال" if db.data.get("bet_doz_image") else "❌ ندارد"
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")],
-        [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")],
-        [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]
-    ])
-    await callback_query.message.edit_text(
-        f"🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: {status}",
-        reply_markup=kb
-    )
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")], [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")], [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]])
+    await callback_query.message.edit_text(f"🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: {status}", reply_markup=kb)
     await callback_query.answer()
 
 @bot.on_callback_query(filters.regex(r"^ADMIN_PHOTO_SET$"))
@@ -1319,14 +1077,7 @@ async def admin_photo_delete_handler(client, callback_query):
     db.data.pop("bet_doz_image", None)
     ok = db.save_data()
     await callback_query.answer("✅ عکس حذف شد." if ok else "❌ خطا در ذخیره دیتابیس.", show_alert=True)
-    await callback_query.message.edit_text(
-        "🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: ❌ ندارد",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")],
-            [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")],
-            [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]
-        ])
-    )
+    await callback_query.message.edit_text("🖼 **مدیریت عکس شرط و دوز**\n\nوضعیت عکس: ❌ ندارد", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📤 ارسال عکس جدید", callback_data="ADMIN_PHOTO_SET")], [InlineKeyboardButton("🗑 حذف عکس", callback_data="ADMIN_PHOTO_DELETE")], [InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="ADMIN_PANEL_BACK")]]))
 
 @bot.on_callback_query(filters.regex(r"^ADMIN_PANEL_BACK$"))
 async def admin_panel_back_handler(client, callback_query):
@@ -1340,129 +1091,69 @@ async def admin_panel_back_handler(client, callback_query):
 async def callback_handler(client, callback_query):
     user_id = callback_query.from_user.id
     data = callback_query.data
-
     if data == "referral":
         bot_info = await client.get_me()
         referral_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
-
-        referral_text = (
-            "👥 **سیستم زیرمجموعه**\n\n"
-            "با لینک اختصاصی خود دوستانتان را به ربات دعوت کنید.\n\n"
-            f"🔗 **لینک دعوت شما:**\n`{referral_link}`\n\n"
-            "📊 تعداد زیرمجموعه‌های شما در نسخه فعلی هنوز ذخیره نمی‌شود."
-        )
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
-
+        referral_text = f"👥 **سیستم زیرمجموعه**\n\nبا لینک اختصاصی خود دوستانتان را به ربات دعوت کنید.\n\n🔗 **لینک دعوت شما:**\n`{referral_link}`\n\n📊 تعداد زیرمجموعه‌های شما در نسخه فعلی هنوز ذخیره نمی‌شود."
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
         await safe_edit_message(callback_query.message, referral_text, reply_markup=keyboard)
         await callback_query.answer()
         return
-
     if data == "buy_guide":
-        guide_text = (
-            "📖 **راهنمای خرید سلف**\n\n"
-            "1️⃣ روی «🛒 خرید سلف» بزنید.\n"
-            "2️⃣ تعداد سکه موردنیاز را انتخاب یا وارد کنید.\n"
-            "3️⃣ مبلغ را طبق اطلاعات پرداخت واریز کنید.\n"
-            "4️⃣ رسید پرداخت را ارسال کنید تا توسط مدیریت بررسی شود.\n\n"
-            "💡 هر 1 سکه معادل 1 ساعت زمان استفاده از سلف است."
-        )
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛒 خرید سلف", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
+        guide_text = "📖 **راهنمای خرید سلف**\n\n1️⃣ روی «🛒 خرید سلف» بزنید.\n2️⃣ تعداد سکه موردنیاز را انتخاب یا وارد کنید.\n3️⃣ مبلغ را طبق اطلاعات پرداخت واریز کنید.\n4️⃣ رسید پرداخت را ارسال کنید تا توسط مدیریت بررسی شود.\n\n💡 هر 1 سکه معادل 1 ساعت زمان استفاده از سلف است."
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🛒 خرید سلف", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
         await safe_edit_message(callback_query.message, guide_text, reply_markup=keyboard)
         await callback_query.answer()
         return
-
     if data == "support":
         if not SUPPORT_USERNAME or SUPPORT_USERNAME == "YourSupportUsername":
             await callback_query.answer("⚠️ یوزرنیم پشتیبانی هنوز تنظیم نشده است.", show_alert=True)
             return
-
-        support_text = (
-            "👨‍💻 **پشتیبانی**\n\n"
-            "برای ارتباط با پشتیبانی روی دکمه زیر کلیک کنید."
-        )
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 ارتباط با پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}", style=KeyboardButtonStyle(bg_success=True))],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
-
+        support_text = "👨‍💻 **پشتیبانی**\n\nبرای ارتباط با پشتیبانی روی دکمه زیر کلیک کنید."
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("💬 ارتباط با پشتیبانی", url=f"https://t.me/{SUPPORT_USERNAME}", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
         await safe_edit_message(callback_query.message, support_text, reply_markup=keyboard)
         await callback_query.answer()
         return
-
     if data == "buy_channel":
         if not BUY_CHANNEL_USERNAME or BUY_CHANNEL_USERNAME == "YourChannelUsername":
             await callback_query.answer("⚠️ یوزرنیم کانال خرید هنوز تنظیم نشده است.", show_alert=True)
             return
-
-        channel_text = (
-            "📣 **کانال خرید**\n\n"
-            "برای مشاهده اطلاعات خرید و اطلاعیه‌ها وارد کانال شوید."
-        )
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📣 ورود به کانال", url=f"https://t.me/{BUY_CHANNEL_USERNAME}", style=KeyboardButtonStyle(bg_success=True))],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
-
+        channel_text = "📣 **کانال خرید**\n\nبرای مشاهده اطلاعات خرید و اطلاعیه‌ها وارد کانال شوید."
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📣 ورود به کانال", url=f"https://t.me/{BUY_CHANNEL_USERNAME}", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
         await safe_edit_message(callback_query.message, channel_text, reply_markup=keyboard)
         await callback_query.answer()
         return
-
     if data == "help":
-        help_text = (
-            "📢 **راهنمای سلف بات**\n\n"
-            "برای مشاهده راهنمای کامل دستورات و امکانات، وارد ربات هلپر شوید."
-        )
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📖 ورود به ربات راهنما", url=f"https://t.me/{HELPER_BOT_USERNAME}", style=KeyboardButtonStyle(bg_primary=True))],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
-        ])
-
+        help_text = "📢 **راهنمای سلف بات**\n\nبرای مشاهده راهنمای کامل دستورات و امکانات، وارد ربات هلپر شوید."
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📖 ورود به ربات راهنما", url=f"https://t.me/{HELPER_BOT_USERNAME}", style=KeyboardButtonStyle(bg_primary=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
         await safe_edit_message(callback_query.message, help_text, reply_markup=keyboard)
         await callback_query.answer()
         return
-    
     if data == "balance_noop":
         await callback_query.answer("💎 اطلاعات موجودی شما", show_alert=False)
         return
-
     if data.startswith("ttt_join_") or data.startswith("ttt_move_"):
         await handle_ttt_callback(client, callback_query)
         return
-
     if data.startswith("joinbet_"):
         if data == "joinbet_waiting":
             await callback_query.answer("⏳ لطفا چند لحظه صبر کنید...", show_alert=True)
             return
         await join_group_bet_handler(client, callback_query)
         return
-    
     if data.startswith("cancelbet_"):
         if data == "cancelbet_waiting":
             await callback_query.answer("⏳ لطفا چند لحظه صبر کنید...", show_alert=True)
             return
         await cancel_group_bet_handler(client, callback_query)
         return
-
-    is_admin_action = (
-        data.startswith(("admin_", "set_", "payment_"))
-        or (data.startswith("stop_") and data != "stop_self")
-    )
+    is_admin_action = data.startswith(("admin_", "set_", "payment_")) or (data.startswith("stop_") and data != "stop_self")
     if is_admin_action:
         if user_id != ADMIN_ID:
             await callback_query.answer("❌ دسترسی غیرمجاز!", show_alert=True)
             return
         await admin_callback_handler(client, callback_query)
         return
-
     if data == "activation_guide":
         text = (
             "🚀 **فعالسازی**\n\n"
@@ -1472,371 +1163,138 @@ async def callback_handler(client, callback_query):
             "𝟒 ـ سلف روی اکانت شما با موفقیت فعال میشود .\n\n"
             "𝟓 - دکمه شیشه ای رنگ ابی فعاسازی با 2 الماس"
         )
-        # دکمه شیشه‌ای (ReplyKeyboard) برای ارسال خودکار شماره
-        reply_kb = ReplyKeyboardMarkup(
-            [
-                [KeyboardButton("📱 ارسال شماره من برای فعالسازی", request_contact=True)],
-                [KeyboardButton("🔙 بازگشت به منو")]
-            ],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
+        reply_kb = ReplyKeyboardMarkup([[KeyboardButton("📱 ارسال شماره من برای فعالسازی", request_contact=True)], [KeyboardButton("🔙 بازگشت به منو")]], resize_keyboard=True, one_time_keyboard=True)
         await callback_query.message.reply_text(text, reply_markup=reply_kb)
         await callback_query.answer()
-    
     elif data == "login":
         credits = db.get("credits", user_id, 0)
         if credits <= 0:
-            await safe_edit_message(callback_query.message, 
-                f"❌ **سکه کافی ندارید!**\n\n💰 سکه های شما: `{credits}`\n\n💡 برای دریافت سکه با پشتیبانی تماس بگیرید.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-            )
+            await safe_edit_message(callback_query.message, f"❌ **سکه کافی ندارید!**\n\n💰 سکه های شما: `{credits}`\n\n💡 برای دریافت سکه با پشتیبانی تماس بگیرید.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]]))
             return
-            
-        await safe_edit_message(callback_query.message, 
-            "📱 **لطفا شماره تلفن خود را ارسال کنید:**\n\n"
-            "**فرمت:** +989123456789\n\n"
-            "⚠️ شماره باید با کد کشور شروع شود",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-        )
+        await safe_edit_message(callback_query.message, "📱 **لطفا شماره تلفن خود را ارسال کنید:**\n\n**فرمت:** +989123456789\n\n⚠️ شماره باید با کد کشور شروع شود", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]]))
         await callback_query.answer()
-    
     elif data == "login_again":
-        await safe_edit_message(callback_query.message, 
-            "📱 **لطفا شماره تلفن جدید خود را ارسال کنید:**\n\n"
-            "**فرمت:** +989123456789\n\n"
-            "⚠️ شماره باید با کد کشور شروع شود",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-        )
+        await safe_edit_message(callback_query.message, "📱 **لطفا شماره تلفن جدید خود را ارسال کنید:**\n\n**فرمت:** +989123456789\n\n⚠️ شماره باید با کد کشور شروع شود", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]]))
         await callback_query.answer()
-
     elif data == "status_credits":
         user_data = db.get("users", user_id, {})
         credits = db.get("credits", user_id, 0)
-        
-        if not user_data:
-            text = "❌ **شما هیچ سلف باتی ندارید**\n\nابتدا باید لاگین کنید و سلف بات را فعال کنید."
-        elif user_data.get('status') == 'active':
-            text = (
-                f"🟢 **سلف بات فعال**\n\n"
-                f"📱 **شماره:** `{user_data.get('phone', '')}`\n"
-                f"💰 **سکه باقی‌مانده:** `{credits}`\n"
-                f"⏰ **زمان باقی‌مانده:** `{credits}` ساعت\n\n"
-                f"⏱ **مصرف:** 1 سکه در ساعت"
-            )
-        else:
-            text = (
-                f"🔴 **سلف بات غیرفعال**\n\n"
-                f"📱 **شماره:** `{user_data.get('phone', '')}`\n"
-                f"💰 **سکه های شما:** `{credits}`\n\n"
-                f"💡 برای فعال کردن سلف بات روی 'فعالسازی' کلیک کنید."
-            )
-        
-        await safe_edit_message(callback_query.message, 
-            text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-        )
+        if not user_data: text = "❌ **شما هیچ سلف باتی ندارید**\n\nابتدا باید لاگین کنید و سلف بات را فعال کنید."
+        elif user_data.get('status') == 'active': text = f"🟢 **سلف بات فعال**\n\n📱 **شماره:** `{user_data.get('phone', '')}`\n💰 **سکه باقی‌مانده:** `{credits}`\n⏰ **زمان باقی‌مانده:** `{credits}` ساعت\n\n⏱ **مصرف:** 1 سکه در ساعت"
+        else: text = f"🔴 **سلف بات غیرفعال**\n\n📱 **شماره:** `{user_data.get('phone', '')}`\n💰 **سکه های شما:** `{credits}`\n\n💡 برای فعال کردن سلف بات روی 'فعالسازی' کلیک کنید."
+        await safe_edit_message(callback_query.message, text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]]))
         await callback_query.answer()
-
     elif data == "bet":
         await betting_info_handler(client, callback_query.message)
         await callback_query.answer()
-
     elif data == "self_management":
         user_data = db.get("users", user_id, {})
         credits = db.get("credits", user_id, 0)
-        
         is_active = user_data.get('status') == 'active'
         process = db.get("processes", user_id)
         status_text = "🟢 **فعال**" if is_active and process else "🔴 **غیرفعال**"
-        
         keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "▶️ روشن کردن سلف",
-                    callback_data="self_start",
-                    style=KeyboardButtonStyle(bg_success=True)
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⏹ خاموش کردن سلف",
-                    callback_data="self_stop",
-                    style=KeyboardButtonStyle(bg_danger=True)
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔄 آپدیت سلف",
-                    callback_data="self_update",
-                    style=KeyboardButtonStyle(bg_primary=True)
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔙 بازگشت",
-                    callback_data="back",
-                    style=KeyboardButtonStyle(bg_primary=True)
-                )
-            ]
+            [InlineKeyboardButton("▶️ روشن کردن سلف", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))],
+            [InlineKeyboardButton("⏹ خاموش کردن سلف", callback_data="self_stop", style=KeyboardButtonStyle(bg_danger=True))],
+            [InlineKeyboardButton("🔄 آپدیت سلف", callback_data="self_update", style=KeyboardButtonStyle(bg_primary=True))],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
         ])
-        
-        await safe_edit_message(callback_query.message, 
-            f"⚙️ **مدیریت سلف بات**\n\n"
-            f"📊 **وضعیت فعلی:** {status_text}\n"
-            f"💰 **سکه ها:** `{credits}`\n\n"
-            f"🔹 **روشن کردن:** سلف بات را فعال می‌کند\n"
-            f"🔹 **خاموش کردن:** سلف بات را متوقف می‌کند\n"
-            f"🔹 **آپدیت سلف:** سلف بات را مجدداً راه‌اندازی می‌کند\n\n"
-            f"📱 **شماره:** `{user_data.get('phone', 'ثبت نشده')}`",
-            reply_markup=keyboard
-        )
+        await safe_edit_message(callback_query.message, f"⚙️ **مدیریت سلف بات**\n\n📊 **وضعیت فعلی:** {status_text}\n💰 **سکه ها:** `{credits}`\n\n🔹 **روشن کردن:** سلف بات را فعال می‌کند\n🔹 **خاموش کردن:** سلف بات را متوقف می‌کند\n🔹 **آپدیت سلف:** سلف بات را مجدداً راه‌اندازی می‌کند\n\n📱 **شماره:** `{user_data.get('phone', 'ثبت نشده')}`", reply_markup=keyboard)
         await callback_query.answer()
-
     elif data == "self_start":
         user_data = db.get("users", user_id, {})
         credits = db.get("credits", user_id, 0)
-        
         if credits <= 0:
-            await safe_edit_message(callback_query.message, 
-                "❌ **سکه کافی ندارید!**\n\n"
-                f"💰 سکه های شما: `{credits}`\n\n"
-                "💡 لطفا ابتدا موجودی خود را افزایش دهید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💰 افزایش موجودی", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, "❌ **سکه کافی ندارید!**\n\n💡 لطفا ابتدا موجودی خود را افزایش دهید.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 افزایش موجودی", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
             return
-        
         if not user_data.get('phone'):
-            await safe_edit_message(callback_query.message, 
-                "❌ **شماره تلفن ثبت نشده است!**\n\n"
-                "لطفا ابتدا از طریق دکمه «فعالسازی» شماره خود را ثبت کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("● فعالسازی ●", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, "❌ **شماره تلفن ثبت نشده است!**\n\nلطفا ابتدا از طریق دکمه «فعالسازی» شماره خود را ثبت کنید.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("● فعالسازی ●", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
             return
-        
         if db.get("processes", user_id):
-            await safe_edit_message(callback_query.message, 
-                "ℹ️ **سلف بات در حال حاضر فعال است!**\n\n"
-                "برای راه‌اندازی مجدد از گزینه «آپدیت سلف» استفاده کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 آپدیت سلف", callback_data="self_update", style=KeyboardButtonStyle(bg_primary=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, "ℹ️ **سلف بات در حال حاضر فعال است!**\n\nبرای راه‌اندازی مجدد از گزینه «آپدیت سلف» استفاده کنید.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 آپدیت سلف", callback_data="self_update", style=KeyboardButtonStyle(bg_primary=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
             return
-        
         if run_selfbot(user_id, user_data.get('phone')):
             credits = db.get("credits", user_id, 0)
-            await safe_edit_message(callback_query.message, 
-                f"✅ **سلف بات با موفقیت روشن شد!**\n\n"
-                f"💰 **سکه باقی‌مانده:** `{credits}`\n"
-                f"⏰ **زمان باقی‌مانده:** `{credits}` ساعت\n\n"
-                f"📱 **شماره:** `{user_data.get('phone')}`",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, f"✅ **سلف بات با موفقیت روشن شد!**\n\n💰 **سکه باقی‌مانده:** `{credits}`\n⏰ **زمان باقی‌مانده:** `{credits}` ساعت\n\n📱 **شماره:** `{user_data.get('phone')}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
         else:
-            await safe_edit_message(callback_query.message, 
-                "❌ **خطا در روشن کردن سلف بات!**\n\n"
-                "لطفا دوباره تلاش کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 تلاش مجدد", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, "❌ **خطا در روشن کردن سلف بات!**\n\nلطفا دوباره تلاش کنید.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 تلاش مجدد", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
         await callback_query.answer()
-
     elif data in ("self_stop", "stop_self"):
         if stop_selfbot(user_id):
-            await safe_edit_message(callback_query.message, 
-                "✅ **سلف بات با موفقیت خاموش شد!**\n\n"
-                "برای روشن کردن مجدد از گزینه «روشن کردن سلف» استفاده کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("▶️ روشن کردن سلف", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, "✅ **سلف بات با موفقیت خاموش شد!**\n\nبرای روشن کردن مجدد از گزینه «روشن کردن سلف» استفاده کنید.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ روشن کردن سلف", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
         else:
-            await safe_edit_message(callback_query.message, 
-                "ℹ️ **سلف بات در حال حاضر خاموش است!**\n\n"
-                "برای روشن کردن از گزینه «روشن کردن سلف» استفاده کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("▶️ روشن کردن سلف", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, "ℹ️ **سلف بات در حال حاضر خاموش است!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ روشن کردن سلف", callback_data="self_start", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
         await callback_query.answer()
-
     elif data == "self_update":
         user_data = db.get("users", user_id, {})
         credits = db.get("credits", user_id, 0)
-        
         if credits <= 0:
-            await safe_edit_message(callback_query.message, 
-                "❌ **سکه کافی ندارید!**\n\n"
-                f"💰 سکه های شما: `{credits}`\n\n"
-                "💡 لطفا ابتدا موجودی خود را افزایش دهید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💰 افزایش موجودی", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, "❌ **سکه کافی ندارید!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 افزایش موجودی", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
             return
-        
         if not user_data.get('phone'):
-            await safe_edit_message(callback_query.message, 
-                "❌ **شماره تلفن ثبت نشده است!**\n\n"
-                "لطفا ابتدا از طریق دکمه «فعالسازی» شماره خود را ثبت کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("● فعالسازی ●", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, "❌ **شماره تلفن ثبت نشده است!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("● فعالسازی ●", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
             return
-        
-        await safe_edit_message(callback_query.message, 
-            "🔄 **در حال آپدیت سلف بات...**\n\n"
-            "لطفا چند لحظه صبر کنید...",
-            reply_markup=None
-        )
-        
+        await safe_edit_message(callback_query.message, "🔄 **در حال آپدیت سلف بات...**\n\nلطفا چند لحظه صبر کنید...", reply_markup=None)
         stop_selfbot(user_id)
         await asyncio.sleep(1)
-        
         if run_selfbot(user_id, user_data.get('phone')):
             credits = db.get("credits", user_id, 0)
-            await safe_edit_message(callback_query.message, 
-                f"✅ **سلف بات با موفقیت آپدیت شد!**\n\n"
-                f"💰 **سکه باقی‌مانده:** `{credits}`\n"
-                f"⏰ **زمان باقی‌مانده:** `{credits}` ساعت\n\n"
-                f"📱 **شماره:** `{user_data.get('phone')}`",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, f"✅ **سلف بات با موفقیت آپدیت شد!**\n\n💰 **سکه باقی‌مانده:** `{credits}`\n⏰ **زمان باقی‌مانده:** `{credits}` ساعت\n\n📱 **شماره:** `{user_data.get('phone')}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
         else:
-            await safe_edit_message(callback_query.message, 
-                "❌ **خطا در آپدیت سلف بات!**\n\n"
-                "لطفا دوباره تلاش کنید.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 تلاش مجدد", callback_data="self_update", style=KeyboardButtonStyle(bg_primary=True))],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
-                ])
-            )
+            await safe_edit_message(callback_query.message, "❌ **خطا در آپدیت سلف بات!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 تلاش مجدد", callback_data="self_update", style=KeyboardButtonStyle(bg_primary=True))], [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]]))
         await callback_query.answer()
-    
     elif data == "increase_balance":
-        await safe_edit_message(callback_query.message, 
-            "💰 **افزایش موجودی**\n\n"
-            f"💎 **نرخ تبدیل:** هر {COIN_RATE} سکه = 50,000 تومان\n"
-            f"💵 **قیمت هر سکه:** {TOMAN_PER_COIN:.0f} تومان\n\n"
-            "🔢 **تعداد سکه مورد نظر خود را وارد کنید:**\n"
-            "مثال: 1440\n\n"
-            "💡 **توجه:** فقط عدد وارد کنید (بدون نقطه یا کاما)",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-        )
+        await safe_edit_message(callback_query.message, "💰 **افزایش موجودی**\n\n💎 **نرخ تبدیل:** هر 1440 سکه = 50,000 تومان\n💵 **قیمت هر سکه:** 35 تومان\n\n🔢 **تعداد سکه مورد نظر خود را وارد کنید:**\nمثال: 1440\n\n💡 **توجه:** فقط عدد وارد کنید (بدون نقطه یا کاما)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]]))
         db.delete("temp_data", f"waiting_coins_{user_id}")
         db.set("temp_data", f"waiting_coins_{user_id}", True)
         await callback_query.answer("✅ لطفا تعداد سکه مورد نظر را وارد کنید")
-
     elif data == "back":
         credits = db.get("credits", user_id, 0)
         user_data = db.get("users", user_id, {})
-        
         status_text = "🔴 سلف غیرفعال"
         phone_text = ""
-        
         if user_data and user_data.get('status') == 'active':
             status_text = "🟢 سلف فعال"
             phone_text = f"\n📱 شماره: {user_data.get('phone', '')}"
-        
         keyboard = create_main_menu(user_id)
-        text = (
-            f"🤖 **ربات مدیریت سلف بات**\n\n"
-            f"**وضعیت:** {status_text}{phone_text}\n"
-            f"**💰 سکه ها:** `{credits}` سکه\n"
-            f"**⏰ مصرف:** 1 سکه در ساعت\n"
-            f"{MENU_WIDTH_PAD}"
-        )
+        text = f"🤖 **ربات مدیریت سلف بات**\n\n**وضعیت:** {status_text}{phone_text}\n**💰 سکه ها:** `{credits}` سکه\n**⏰ مصرف:** 1 سکه در ساعت\n{MENU_WIDTH_PAD}"
         await safe_edit_message(callback_query.message, text, reply_markup=keyboard)
         await callback_query.answer()
-    
     elif data == "check_join":
         ok, not_joined = await check_force_join(client, user_id)
         if ok:
-            try:
-                await callback_query.message.delete()
-            except Exception:
-                pass
+            try: await callback_query.message.delete()
+            except: pass
             await show_main_menu(client, callback_query.message.chat.id, callback_query.from_user)
             await callback_query.answer("✅ عضویت تایید شد.")
             return
         buttons = []
-        for ch in not_joined:
-            buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
+        for ch in not_joined: buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
         buttons.append([InlineKeyboardButton("🔄 بررسی مجدد", callback_data="check_join")])
-        await safe_edit_message(callback_query.message, 
-            "❌ هنوز عضو همه کانال‌ها نیستید!",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+        await safe_edit_message(callback_query.message, "❌ هنوز عضو همه کانال‌ها نیستید!", reply_markup=InlineKeyboardMarkup(buttons))
         await callback_query.answer()
 
 @bot.on_message(filters.user(ADMIN_ID) & filters.regex(r'^\d+$'))
 async def handle_admin_input(client, message: Message):
     user_id = message.from_user.id
     amount = int(message.text)
-    
-    # ✅ بررسی ادمین در حال خرید سکه
     if db.get("temp_data", f"waiting_coins_{user_id}"):
         try:
             coins_amount = int(message.text)
             if coins_amount <= 0:
                 await message.reply_text("❌ تعداد سکه باید بیشتر از صفر باشد")
                 return
-            
             toman_amount = coins_amount * TOMAN_PER_COIN
-            
-            payment_data = {
-                "user_id": user_id,
-                "coins": coins_amount,
-                "toman": toman_amount,
-                "timestamp": time.time(),
-                "status": "pending",
-                "first_name": message.from_user.first_name or "",
-                "username": message.from_user.username or ""
-            }
-            
+            payment_data = {"user_id": user_id, "coins": coins_amount, "toman": toman_amount, "timestamp": time.time(), "status": "pending", "first_name": message.from_user.first_name or "", "username": message.from_user.username or ""}
             db.set("payments", user_id, payment_data)
             db.delete("temp_data", f"waiting_coins_{user_id}")
-            
-            payment_text = (
-                f"💳 **برای پرداخت لطفا مبلغ {toman_amount:,.0f} تومان به حساب زیر واریز کنید:**\n\n"
-                f"🏦 **بانک:** {card_info['bank_name']}\n"
-                f"🔢 **شماره کارت:** `{card_info['card_number']}`\n"
-                f"👤 **به نام:** {card_info['card_owner']}\n\n"
-                f"💎 **تعداد سکه دریافتی:** {coins_amount} سکه\n\n"
-                f"📸 **پس از واریز، رسید یا عکس پرداخت را ارسال کنید**\n"
-                f"⏰ پرداخت شما حداکثر تا 24 ساعت بررسی خواهد شد"
-            )
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 انصراف", callback_data="increase_balance")]
-            ])
-            
+            payment_text = f"💳 **برای پرداخت لطفا مبلغ {toman_amount:,.0f} تومان به حساب زیر واریز کنید:**\n\n🏦 **بانک:** {card_info['bank_name']}\n🔢 **شماره کارت:** `{card_info['card_number']}`\n👤 **به نام:** {card_info['card_owner']}\n\n💎 **تعداد سکه دریافتی:** {coins_amount} سکه\n\n📸 **پس از واریز، رسید یا عکس پرداخت را ارسال کنید**\n⏰ پرداخت شما حداکثر تا 24 ساعت بررسی خواهد شد"
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="increase_balance")]])
             await message.reply_text(payment_text, reply_markup=keyboard)
             db.set("temp_data", f"waiting_payment_proof_{user_id}", True)
-            
         except ValueError:
             await message.reply_text("❌ لطفا یک عدد معتبر وارد کنید")
         return
-
     if db.get("temp_data", f"admin_global_coins_{user_id}"):
         db.delete("temp_data", f"admin_global_coins_{user_id}")
         users = db.get_all("users")
@@ -1847,21 +1305,14 @@ async def handle_admin_input(client, message: Message):
             count += 1
         await message.reply_text(f"✅ به {count} کاربر، هر کدام {amount:,} الماس اضافه شد.")
         return
-
     set_target = db.get("temp_data", f"admin_set_{user_id}")
     if set_target:
         db.delete("temp_data", f"admin_set_{user_id}")
         db.set("credits", set_target, amount)
-        
         await message.reply_text(f"✅ سکه کاربر {set_target} تنظیم شد به {amount}")
-        
-        try:
-            await bot.send_message(set_target, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
+        try: await bot.send_message(set_target, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
         except: pass
 
-# ==============================
-# بازی دوز گروهی (2 نفره)
-# ==============================
 def _ttt_keyboard(game_id, board, enabled=True):
     cells = []
     for i, value in enumerate(board):
@@ -1880,16 +1331,11 @@ async def ttt_create(client, message: Message):
     gid = f"{message.chat.id}_{message.id}"
     game={"chat_id":message.chat.id,"creator_id":message.from_user.id,"creator_name":message.from_user.first_name or "کاربر","player2_id":None,"board":[" "]*9,"turn":None,"message_id":None,"finished":False}
     db.set("tic_tac_toe", gid, game)
-    text=("🎮 <b>بازی دوز</b>\n\n"
-          f"👤 سازنده: <b>{html.escape(message.from_user.first_name or 'کاربر')}</b>\n"
-          "⏳ منتظر یک بازیکن دیگر...\n\n"
-          "بازیکن اول: ❌ | بازیکن دوم: ⭕")
+    text=("🎮 <b>بازی دوز</b>\n\n"f"👤 سازنده: <b>{html.escape(message.from_user.first_name or 'کاربر')}</b>\n⏳ منتظر یک بازیکن دیگر...\n\nبازیکن اول: ❌ | بازیکن دوم: ⭕")
     kb=InlineKeyboardMarkup([[InlineKeyboardButton("🎮 پیوستن به بازی",callback_data=f"ttt_join_{gid}",style=KeyboardButtonStyle(bg_success=True))]])
     image = db.data.get("bet_doz_image")
-    if image:
-        m=await message.reply_photo(photo=image, caption=text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
-    else:
-        m=await message.reply_text(text,reply_markup=kb,parse_mode=enums.ParseMode.HTML)
+    if image: m=await message.reply_photo(photo=image, caption=text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
+    else: m=await message.reply_text(text,reply_markup=kb,parse_mode=enums.ParseMode.HTML)
     game["message_id"]=m.id; db.set("tic_tac_toe",gid,game)
 
 async def handle_ttt_callback(client, q):
@@ -1900,9 +1346,7 @@ async def handle_ttt_callback(client, q):
         if q.from_user.id==g["creator_id"]: await q.answer("شما سازنده بازی هستید.",show_alert=True); return
         if g.get("player2_id"): await q.answer("بازی پر شده است.",show_alert=True); return
         g["player2_id"]=q.from_user.id; g["player2_name"]=q.from_user.first_name or "کاربر"; g["turn"]=g["creator_id"]; db.set("tic_tac_toe",gid,g)
-        text=("🎮 <b>بازی دوز شروع شد!</b>\n\n"
-              f"❌ {html.escape(g['creator_name'])}\n⭕ {html.escape(g['player2_name'])}\n\n"
-              f"نوبت: ❌ {html.escape(g['creator_name'])}")
+        text=("🎮 <b>بازی دوز شروع شد!</b>\n\n"f"❌ {html.escape(g['creator_name'])}\n⭕ {html.escape(g['player2_name'])}\n\nنوبت: ❌ {html.escape(g['creator_name'])}")
         await safe_edit_message(q.message,text,reply_markup=_ttt_keyboard(gid,g["board"]),parse_mode=enums.ParseMode.HTML)
         await q.answer("به بازی پیوستید!"); return
     rest=data[len("ttt_move_"):]; gid, idxs=rest.rsplit("_",1); idx=int(idxs); g=db.get("tic_tac_toe",gid)
@@ -1920,9 +1364,7 @@ async def handle_ttt_callback(client, q):
         await safe_edit_message(q.message,text,reply_markup=_ttt_keyboard(gid,g["board"],False),parse_mode=enums.ParseMode.HTML); await q.answer(); return
     g["turn"]=g["player2_id"] if q.from_user.id==g["creator_id"] else g["creator_id"]; db.set("tic_tac_toe",gid,g)
     turn_name=g["creator_name"] if g["turn"]==g["creator_id"] else g["player2_name"]; turn_mark="❌" if g["turn"]==g["creator_id"] else "⭕"
-    text=("🎮 <b>بازی دوز</b>\n\n"
-          f"❌ {html.escape(g['creator_name'])}\n⭕ {html.escape(g['player2_name'])}\n\n"
-          f"نوبت: {turn_mark} <b>{html.escape(turn_name)}</b>")
+    text=("🎮 <b>بازی دوز</b>\n\n"f"❌ {html.escape(g['creator_name'])}\n⭕ {html.escape(g['player2_name'])}\n\nنوبت: {turn_mark} <b>{html.escape(turn_name)}</b>")
     await safe_edit_message(q.message,text,reply_markup=_ttt_keyboard(gid,g["board"]),parse_mode=enums.ParseMode.HTML); await q.answer()
 
 @bot.on_message(filters.command("start"))
@@ -1930,15 +1372,10 @@ async def start_handler(client, message: Message):
     ok, not_joined = await check_force_join(client, message.from_user.id)
     if not ok:
         buttons = []
-        for ch in not_joined:
-            buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
+        for ch in not_joined: buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
         buttons.append([InlineKeyboardButton("● بررسی عضویت ●", callback_data="check_join")])
-        await message.reply_text(
-            "❌ برای استفاده از ربات باید در تمام کانال‌های زیر عضو شوید:",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+        await message.reply_text("❌ برای استفاده از ربات باید در تمام کانال‌های زیر عضو شوید:", reply_markup=InlineKeyboardMarkup(buttons))
         return
-
     await show_main_menu(client, message.chat.id, message.from_user)
 
 @bot.on_callback_query(filters.regex(r'^joinbet_(-?\d+)_(-?\d+)$'))
@@ -1948,23 +1385,17 @@ async def join_group_bet_handler(client, callback_query):
     user_mention = f'<a href="tg://user?id={user_id}"><b>{user_first_name}</b></a>'
     data = callback_query.data
     _, chat_id_str, msg_id_str = data.split('_')
-
-    chat_id = int(chat_id_str)
-    message_id = int(msg_id_str)
-    bet_key = f"{chat_id}_{message_id}"
-
+    chat_id = int(chat_id_str); message_id = int(msg_id_str); bet_key = f"{chat_id}_{message_id}"
     bet_data = db.get("group_bets", bet_key)
     if not bet_data or not bet_data.get("is_active"):
         await callback_query.answer("❌ این شرط دیگر فعال نیست.", show_alert=True)
         return
-
     if bet_data.get("finished"):
         await callback_query.answer("❌ این شرط قبلا به پایان رسیده است.", show_alert=True)
         return
     if callback_query.message.chat.id != chat_id:
         await callback_query.answer("❌ این دکمه مخصوص گروه اصلی شرط است.", show_alert=True)
         return
-
     creator_id = bet_data["creator_id"]
     creator_first_name = html.escape(bet_data.get('creator_name', 'کاربر'))
     creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
@@ -1975,59 +1406,32 @@ async def join_group_bet_handler(client, callback_query):
     if len(participants) >= 1:
         await callback_query.answer("⛔ ظرفیت این شرط تکمیل شده است.", show_alert=True)
         return
-
     if user_id in [p["id"] for p in participants]:
         await callback_query.answer("ℹ️ شما قبلا در این شرط شرکت کرده‌اید.", show_alert=True)
         return
-
     amount = bet_data["amount"]
     current_credits = db.get("credits", user_id, 0)
-
     if current_credits < amount:
-        await callback_query.answer(
-            f"❌ سکه کافی ندارید!\n💰 موجودی شما: {current_credits} سکه",
-            show_alert=True
-        )
+        await callback_query.answer(f"❌ سکه کافی ندارید!\n💰 موجودی شما: {current_credits} سکه", show_alert=True)
         return
     db.set("credits", user_id, current_credits - amount)
-
-    participants.append({
-        "id": user_id,
-        "name": callback_query.from_user.first_name or "",
-        "username": callback_query.from_user.username or ""
-    })
+    participants.append({"id": user_id, "name": callback_query.from_user.first_name or "", "username": callback_query.from_user.username or ""})
     bet_data["participants"] = participants
     if not bet_data.get("timer_started"):
         bet_data["timer_started"] = True
         db.set("group_bets", bet_key, bet_data)
         asyncio.create_task(finish_group_bet(client, bet_key))
-    else:
-        db.set("group_bets", bet_key, bet_data)
+    else: db.set("group_bets", bet_key, bet_data)
     try:
         participants_mentions = []
         for p in participants:
             p_name = html.escape(p.get('name', 'کاربر'))
             participants_mentions.append(f'<a href="tg://user?id={p["id"]}"><b>{p_name}</b></a>')
-        
         all_players_mentions = [creator_mention] + participants_mentions
-        
-        new_text = (
-            "🎲 شرط 1v1 در حال اجرا\n\n"
-            f"💰 مبلغ هر نفر: <code>{amount}</code> سکه\n"
-            f"👥 شرکت‌کننده‌ها: <code>{len(participants) + 1}/2</code> نفر\n"
-            f"👤 بازیکنان: {', '.join(all_players_mentions)}\n\n"
-            "⏳ ۵ ثانیه بعد بین این دو نفر قرعه‌کشی می‌شود."
-        )
-        new_keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ پیوستن به شرط", callback_data=f"joinbet_{chat_id}_{message_id}"),
-                InlineKeyboardButton("⛔ لغو شرط", callback_data=f"cancelbet_{chat_id}_{message_id}")
-            ]
-        ])
+        new_text = f"🎲 شرط 1v1 در حال اجرا\n\n💰 مبلغ هر نفر: <code>{amount}</code> سکه\n👥 شرکت‌کننده‌ها: <code>{len(participants) + 1}/2</code> نفر\n👤 بازیکنان: {', '.join(all_players_mentions)}\n\n⏳ ۵ ثانیه بعد بین این دو نفر قرعه‌کشی می‌شود."
+        new_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("✅ پیوستن به شرط", callback_data=f"joinbet_{chat_id}_{message_id}"), InlineKeyboardButton("⛔ لغو شرط", callback_data=f"cancelbet_{chat_id}_{message_id}")]])
         await safe_edit_message(callback_query.message, new_text, reply_markup=new_keyboard, parse_mode=enums.ParseMode.HTML)
-    except Exception as e:
-        print(f"Error updating bet message: {e}")
-
+    except: pass
     await callback_query.answer("✅ در شرط شرکت کردید و سکه از حساب شما کسر شد.")
 
 @bot.on_callback_query(filters.regex(r'^cancelbet_(-?\d+)_(-?\d+)$'))
@@ -2037,28 +1441,20 @@ async def cancel_group_bet_handler(client, callback_query):
     user_mention = f'<a href="tg://user?id={user_id}"><b>{user_first_name}</b></a>'
     data = callback_query.data
     _, chat_id_str, msg_id_str = data.split('_')
-
-    chat_id = int(chat_id_str)
-    message_id = int(msg_id_str)
-    bet_key = f"{chat_id}_{message_id}"
-
+    chat_id = int(chat_id_str); message_id = int(msg_id_str); bet_key = f"{chat_id}_{message_id}"
     bet_data = db.get("group_bets", bet_key)
     if not bet_data:
         await callback_query.answer("❌ این شرط یافت نشد یا قبلا حذف شده.", show_alert=True)
         return
-
     creator_id = bet_data["creator_id"]
     creator_first_name = html.escape(bet_data.get('creator_name', 'کاربر'))
     creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
-
     if user_id != creator_id:
         await callback_query.answer("❌ فقط سازنده شرط می‌تواند آن را لغو کند.", show_alert=True)
         return
-
     if bet_data.get("finished"):
         await callback_query.answer("❌ این شرط قبلا تمام شده است.", show_alert=True)
         return
-
     amount = bet_data["amount"]
     participants = bet_data.get("participants", [])
     if not bet_data.get("refunded"):
@@ -2069,61 +1465,34 @@ async def cancel_group_bet_handler(client, callback_query):
         uid = participant["id"]
         credits = db.get("credits", uid, 0)
         db.set("credits", uid, credits + amount)
-
-    bet_data["finished"] = True
-    bet_data["is_active"] = False
+    bet_data["finished"] = True; bet_data["is_active"] = False
     db.set("group_bets", bet_key, bet_data)
-
     participants_mentions = []
     for p in participants:
         p_name = html.escape(p.get('name', 'کاربر'))
         participants_mentions.append(f'<a href="tg://user?id={p["id"]}"><b>{p_name}</b></a>')
-    
     all_users_text = creator_mention
-    if participants_mentions:
-        all_users_text += f", {', '.join(participants_mentions)}"
-
-    text = (
-        "⛔ این شرط توسط سازنده لغو شد.\n\n"
-        f"👤 سازنده: {creator_mention}\n"
-        f"👥 سایر بازیکنان: {', '.join(participants_mentions) if participants_mentions else 'ندارد'}\n"
-        f"💰 مبلغ شرط: <code>{amount}</code> سکه\n"
-        "💸 مبلغ به تمام افراد (سازنده و شرکت‌کننده‌ها) برگشت داده شد."
-    )
-
-    try:
-        await safe_edit_message(callback_query.message, text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-    except:
-        pass
-
+    if participants_mentions: all_users_text += f", {', '.join(participants_mentions)}"
+    text = f"⛔ این شرط توسط سازنده لغو شد.\n\n👤 سازنده: {creator_mention}\n👥 سایر بازیکنان: {', '.join(participants_mentions) if participants_mentions else 'ندارد'}\n💰 مبلغ شرط: <code>{amount}</code> سکه\n💸 مبلغ به تمام افراد (سازنده و شرکت‌کننده‌ها) برگشت داده شد."
+    try: await safe_edit_message(callback_query.message, text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
+    except: pass
     await callback_query.answer("✅ شرط با موفقیت لغو شد.", show_alert=True)
 
 @bot.on_callback_query(filters.regex("check_join"))
 async def check_join(client, callback_query):
     user_id = callback_query.from_user.id
     ok, not_joined = await check_force_join(client, user_id)
-
     if ok:
-        try:
-            await callback_query.message.delete()
-        except Exception:
-            pass
+        try: await callback_query.message.delete()
+        except: pass
         await show_main_menu(client, callback_query.message.chat.id, callback_query.from_user)
         await callback_query.answer("✅ عضویت تایید شد.")
         return
-
     buttons = []
-    for ch in not_joined:
-        buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
-
+    for ch in not_joined: buttons.append([InlineKeyboardButton(f"📢 عضویت در @{ch}", url=f"https://t.me/{ch}")])
     buttons.append([InlineKeyboardButton("🔄 بررسی مجدد", callback_data="check_join")])
+    await safe_edit_message(callback_query.message, "❌ هنوز عضو همه کانال‌ها نیستید!", reply_markup=InlineKeyboardMarkup(buttons))
 
-    await safe_edit_message(callback_query.message, 
-        "❌ هنوز عضو همه کانال‌ها نیستید!",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-# هندلر دکمه شیشه‌ای بازگشت به منو
 @bot.on_message(filters.private & filters.regex(r'^🔙 بازگشت به منو$'))
 async def back_to_main_from_reply(client, message: Message):
     await message.reply_text("برگشت به منو اصلی...", reply_markup=ReplyKeyboardRemove())
@@ -2134,103 +1503,81 @@ async def back_to_main_from_reply(client, message: Message):
 async def handle_contact(client, message: Message):
     user_id = message.from_user.id
     phone = message.contact.phone_number
-    
-    if not phone.startswith('+'):
-        phone = '+' + phone
-        
+    if not phone.startswith('+'): phone = '+' + phone
     credits = db.get("credits", user_id, 0)
     if credits <= 0:
         await message.reply_text(f"❌ سکه کافی ندارید!\nسکه های شما: {credits}\nلطفا از منوی خرید الماس اقدام کنید.", reply_markup=ReplyKeyboardRemove())
         await show_main_menu(client, message.chat.id, message.from_user)
         return
-    
     if user_id in active_clients:
         try:
             await active_clients[user_id].disconnect()
             del active_clients[user_id]
-        except:
-            pass
-    
+        except: pass
     try:
         session_name = f"sessions/{user_id}"
-        temp_client = Client(session_name, api_id=API_ID, api_hash=API_HASH)
+        creds = get_random_api() # انتخاب رندوم API
+        temp_client = Client(session_name, api_id=creds["api_id"], api_hash=creds["api_hash"])
         await temp_client.connect()
-        
         active_clients[user_id] = temp_client
         sent_code = await temp_client.send_code(phone)
         user_data = db.get("users", user_id, {})
         user_data["phone"] = phone
         db.set("users", user_id, user_data)
-        
-        await message.reply_text(
-            "✅ **کد تأیید ارسال شد**\n\n"
-            "🔢 **کد ۵ رقمی را با دکمه‌های زیر وارد کنید:**\n\n"
-            f"<b><code>{format_code_display('')}</code></b>\n\n"
-            "📱 کد ارسال شده به شماره شما",
-            reply_markup=create_numpad_keyboard(),
-            parse_mode=enums.ParseMode.HTML
-        )
-        
-        db.set("temp_data", user_id, {
-            "phone": phone, 
-            "phone_code_hash": sent_code.phone_code_hash,
-            "client_active": True
-        })
-        
+        await message.reply_text("✅ **کد تأیید ارسال شد**\n\n🔢 **کد ۵ رقمی را با دکمه‌های زیر وارد کنید:**\n\n<b><code>{format_code_display('')}</code></b>\n\n📱 کد ارسال شده به شماره شما", reply_markup=create_numpad_keyboard(), parse_mode=enums.ParseMode.HTML)
+        db.set("temp_data", user_id, {"phone": phone, "phone_code_hash": sent_code.phone_code_hash, "client_active": True, "api_id": creds["api_id"], "api_hash": creds["api_hash"]})
     except Exception as e:
-        await message.reply_text(f"❌ **خطا:** {str(e)}", reply_markup=ReplyKeyboardRemove())
+        error_msg = str(e).upper()
+        if "FLOOD" in error_msg:
+            match = re.search(r'(\d+)', str(e))
+            wait_time = match.group(1) if match else "چند"
+            await message.reply_text(f"⏳ **تلگرام در حال حاضر ارسال کد را محدود کرده است.**\n\nلطفاً حدود {wait_time} ثانیه دیگر یا با یک شماره جدید امتحان کنید.", reply_markup=ReplyKeyboardRemove())
+        elif "PHONE_NUMBER_BANNED" in error_msg:
+            await message.reply_text("🚫 **این شماره توسط تلگرام مسدود شده است.**", reply_markup=ReplyKeyboardRemove())
+        else:
+            await message.reply_text(f"❌ **خطا:** {str(e)}", reply_markup=ReplyKeyboardRemove())
 
 @bot.on_message(filters.private & filters.regex(r'^\+\d{10,15}$'))
 async def handle_phone(client, message: Message):
     user_id, phone = message.from_user.id, message.text
-    
     if user_id in active_clients:
         try:
             await active_clients[user_id].disconnect()
             del active_clients[user_id]
-        except:
-            pass
-    
+        except: pass
     credits = db.get("credits", user_id, 0)
     if credits <= 0:
         await message.reply_text(f"❌ سکه کافی ندارید!\nسکه های شما: {credits}")
         return
-    
     try:
         session_name = f"sessions/{user_id}"
-        temp_client = Client(session_name, api_id=API_ID, api_hash=API_HASH)
+        creds = get_random_api() # انتخاب رندوم API
+        temp_client = Client(session_name, api_id=creds["api_id"], api_hash=creds["api_hash"])
         await temp_client.connect()
-        
         active_clients[user_id] = temp_client
         sent_code = await temp_client.send_code(phone)
         user_data = db.get("users", user_id, {})
         user_data["phone"] = phone
         db.set("users", user_id, user_data)
-        await message.reply_text(
-            "✅ **کد تأیید ارسال شد**\n\n"
-            "🔢 **کد ۵ رقمی را با دکمه‌های زیر وارد کنید:**\n\n"
-            f"<b><code>{format_code_display('')}</code></b>\n\n"
-            "📱 کد ارسال شده به شماره شما",
-            reply_markup=create_numpad_keyboard(),
-            parse_mode=enums.ParseMode.HTML
-        )
-        
-        db.set("temp_data", user_id, {
-            "phone": phone, 
-            "phone_code_hash": sent_code.phone_code_hash,
-            "client_active": True
-        })
-        
+        await message.reply_text("✅ **کد تأیید ارسال شد**\n\n🔢 **کد ۵ رقمی را با دکمه‌های زیر وارد کنید:**\n\n<b><code>{format_code_display('')}</code></b>\n\n📱 کد ارسال شده به شماره شما", reply_markup=create_numpad_keyboard(), parse_mode=enums.ParseMode.HTML)
+        db.set("temp_data", user_id, {"phone": phone, "phone_code_hash": sent_code.phone_code_hash, "client_active": True, "api_id": creds["api_id"], "api_hash": creds["api_hash"]})
     except Exception as e:
-        await message.reply_text(f"❌ **خطا:** {str(e)}")
+        error_msg = str(e).upper()
+        if "FLOOD" in error_msg:
+            match = re.search(r'(\d+)', str(e))
+            wait_time = match.group(1) if match else "چند"
+            await message.reply_text(f"⏳ **تلگرام در حال حاضر ارسال کد را محدود کرده است.**\n\nلطفاً حدود {wait_time} ثانیه دیگر یا با یک شماره جدید امتحان کنید.")
+        elif "PHONE_NUMBER_BANNED" in error_msg:
+            await message.reply_text("🚫 **این شماره توسط تلگرام مسدود شده است.**")
+        else:
+            await message.reply_text(f"❌ **خطا:** {str(e)}")
         if user_id in active_clients:
             try:
                 await active_clients[user_id].disconnect()
                 del active_clients[user_id]
-            except:
-                pass
+            except: pass
 
-@bot.on_message(filters.private & filters.text)
+@bot.on_message(filters.private & filters.text & ~filters.user(ADMIN_ID))
 async def handle_all_messages(client, message: Message):
     user_id = message.from_user.id
     text = message.text
@@ -2240,39 +1587,14 @@ async def handle_all_messages(client, message: Message):
             if coins_amount <= 0:
                 await message.reply_text("❌ تعداد سکه باید بیشتر از صفر باشد")
                 return
-            
             toman_amount = coins_amount * TOMAN_PER_COIN
-            
-            payment_data = {
-                "user_id": user_id,
-                "coins": coins_amount,
-                "toman": toman_amount,
-                "timestamp": time.time(),
-                "status": "pending",
-                "first_name": message.from_user.first_name or "",
-                "username": message.from_user.username or ""
-            }
-            
+            payment_data = {"user_id": user_id, "coins": coins_amount, "toman": toman_amount, "timestamp": time.time(), "status": "pending", "first_name": message.from_user.first_name or "", "username": message.from_user.username or ""}
             db.set("payments", user_id, payment_data)
             db.delete("temp_data", f"waiting_coins_{user_id}")
-            
-            payment_text = (
-                f"💳 **برای پرداخت لطفا مبلغ {toman_amount:,.0f} تومان به حساب زیر واریز کنید:**\n\n"
-                f"🏦 **بانک:** {card_info['bank_name']}\n"
-                f"🔢 **شماره کارت:** `{card_info['card_number']}`\n"
-                f"👤 **به نام:** {card_info['card_owner']}\n\n"
-                f"💎 **تعداد سکه دریافتی:** {coins_amount} سکه\n\n"
-                f"📸 **پس از واریز، رسید یا عکس پرداخت را ارسال کنید**\n"
-                f"⏰ پرداخت شما حداکثر تا 24 ساعت بررسی خواهد شد"
-            )
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 انصراف", callback_data="increase_balance")]
-            ])
-            
+            payment_text = f"💳 **برای پرداخت لطفا مبلغ {toman_amount:,.0f} تومان به حساب زیر واریز کنید:**\n\n🏦 **بانک:** {card_info['bank_name']}\n🔢 **شماره کارت:** `{card_info['card_number']}`\n👤 **به نام:** {card_info['card_owner']}\n\n💎 **تعداد سکه دریافتی:** {coins_amount} سکه\n\n📸 **پس از واریز، رسید یا عکس پرداخت را ارسال کنید**\n⏰ پرداخت شما حداکثر تا 24 ساعت بررسی خواهد شد"
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="increase_balance")]])
             await message.reply_text(payment_text, reply_markup=keyboard)
             db.set("temp_data", f"waiting_payment_proof_{user_id}", True)
-            
         except ValueError:
             await message.reply_text("❌ لطفا یک عدد معتبر وارد کنید")
         return
@@ -2283,126 +1605,57 @@ async def handle_all_messages(client, message: Message):
             if user_id not in active_clients:
                 await message.reply_text("❌ کلاینت فعال نیست. لطفا دوباره شماره را ارسال کنید.")
                 return
-            
             user_client = active_clients[user_id]
             await user_client.check_password(text)
-            
-            user_info = {
-                "phone": temp_data["phone"],
-                "status": "active",
-                "created_at": time.time(),
-                "last_active": time.time(),
-                }
+            user_info = {"phone": temp_data["phone"], "status": "active", "created_at": time.time(), "last_active": time.time(), "api_id": temp_data["api_id"], "api_hash": temp_data["api_hash"]}
             db.set("users", user_id, user_info)
             db.delete("temp_data", user_id)
-            
             if user_id in active_clients:
                 try:
                     await active_clients[user_id].disconnect()
                     del active_clients[user_id]
-                except:
-                    pass
-            
+                except: pass
+            await asyncio.sleep(1)
             if run_selfbot(user_id, temp_data["phone"]):
                 credits = db.get("credits", user_id, 0)
-                await message.reply_text(
-                    f"✅ **سلف بات فعال شد!**\n\n"
-                    f"💰 سکه های شما: {credits}\n"
-                    f"⏰ زمان باقی‌مانده: {credits} ساعت"
-                )
-            else: 
-                await message.reply_text("❌ خطا در اجرای سلف")
-            
+                await message.reply_text(f"✅ **سلف بات فعال شد!**\n\n💰 سکه های شما: {credits}\n⏰ زمان باقی‌مانده: {credits} ساعت")
+            else: await message.reply_text("❌ خطا در اجرای سلف")
         except Exception as e: 
             await message.reply_text(f"❌ رمز اشتباه: {str(e)}")
         return
 
-    if user_id == ADMIN_ID:
-        set_target = db.get("temp_data", f"admin_set_{user_id}")
-        if set_target and text.isdigit():
-            amount = int(text)
-            db.delete("temp_data", f"admin_set_{user_id}")
-            db.set("credits", set_target, amount)
-            
-            await message.reply_text(f"✅ سکه کاربر {set_target} تنظیم شد به {amount}")
-            
-            try:
-                await bot.send_message(set_target, f"🔧 موجودی سکه شما تنظیم شد\n💰 جدید: {amount} سکه")
-            except: 
-                pass
-            return
-    
-    pass
-
 @bot.on_message(filters.photo & filters.private)
 async def handle_card_photo(client, message: Message):
     user_id = message.from_user.id
-
-    # ✅ بررسی آپلود عکس شرط و دوز توسط ادمین
     if user_id in admin_photo_wait:
         admin_photo_wait.discard(user_id)
         ok = save_bet_doz_image(message.photo.file_id)
-        if ok:
-            await message.reply_text(
-                "✅ **عکس شرط و دوز با موفقیت ذخیره شد.**\n"
-                "از این به بعد عکس در شرط و بازی دوز استفاده می‌شود."
-            )
-        else:
-            await message.reply_text("❌ ذخیره عکس در دیتابیس ناموفق بود.")
+        if ok: await message.reply_text("✅ **عکس شرط و دوز با موفقیت ذخیره شد.**\nاز این به بعد عکس در شرط و بازی دوز استفاده می‌شود.")
+        else: await message.reply_text("❌ ذخیره عکس در دیتابیس ناموفق بود.")
         return
-
     if db.get("temp_data", f"waiting_payment_proof_{user_id}"):
         payment_data = db.get("payments", user_id)
         if not payment_data:
             await message.reply_text("❌ اطلاعات پرداخت یافت نشد. لطفا دوباره تلاش کنید.")
             return
-        
         payment_data["proof_photo_id"] = message.photo.file_id
         payment_data["proof_sent_at"] = time.time()
         db.set("payments", user_id, payment_data)
-        
-        admin_text = (
-            f"💰 **درخواست افزایش موجودی جدید**\n\n"
-            f"👤 **کاربر:** {message.from_user.first_name or 'ناشناس'}\n"
-            f"🆔 **آیدی:** `{user_id}`\n"
-            f"📧 **یوزرنیم:** @{message.from_user.username or 'ندارد'}\n"
-            f"💎 **تعداد سکه:** {payment_data['coins']}\n"
-            f"💵 **مبلغ:** {payment_data['toman']:,.0f} تومان\n"
-            f"⏰ **زمان:** {time.ctime()}"
-        )
-        
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ تایید پرداخت", callback_data=f"payment_approve_{user_id}"),
-                InlineKeyboardButton("❌ رد پرداخت", callback_data=f"payment_reject_{user_id}")
-            ]
-        ])
-        
+        admin_text = f"💰 **درخواست افزایش موجودی جدید**\n\n👤 **کاربر:** {message.from_user.first_name or 'ناشناس'}\n🆔 **آیدی:** `{user_id}`\n📧 **یوزرنیم:** @{message.from_user.username or 'ندارد'}\n💎 **تعداد سکه:** {payment_data['coins']}\n💵 **مبلغ:** {payment_data['toman']:,.0f} تومان\n⏰ **زمان:** {time.ctime()}"
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("✅ تایید پرداخت", callback_data=f"payment_approve_{user_id}"), InlineKeyboardButton("❌ رد پرداخت", callback_data=f"payment_reject_{user_id}")]])
         try:
             await message.forward(ADMIN_ID)
             await bot.send_message(ADMIN_ID, admin_text, reply_markup=keyboard)
-            
-            await message.reply_text(
-                "✅ **رسید پرداخت شما دریافت شد و برای تایید به ادمین ارسال شد**\n\n"
-                "⏳ لطفا منتظر تایید ادمین باشید\n"
-                "🔔 پس از تایید، سکه ها به حساب شما اضافه خواهد شد",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
-            )
-            
+            await message.reply_text("✅ **رسید پرداخت شما دریافت شد و برای تایید به ادمین ارسال شد**\n\n⏳ لطفا منتظر تایید ادمین باشید\n🔔 پس از تایید، سکه ها به حساب شما اضافه خواهد شد", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]]))
             db.delete("temp_data", f"waiting_payment_proof_{user_id}")
-            
         except Exception as e:
             await message.reply_text("❌ خطا در ارسال به ادمین. لطفا بعدا تلاش کنید.")
 
 def main():
     print("● ربات سلف ساز روشن شد ●")
-    print("✅ ADMIN PHOTO PANEL: ENABLED")
-    try: 
-        bot.run()
-    except KeyboardInterrupt: 
-        print("\n🛑 توقف ربات...")
-    except Exception as e: 
-        print(f"❌ خطا: {e}")
+    try: bot.run()
+    except KeyboardInterrupt: print("\n🛑 توقف ربات...")
+    except Exception as e: print(f"❌ خطا: {e}")
     finally: 
         stop_all_selfbots()
         print("✅ ربات متوقف شد")
