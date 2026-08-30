@@ -1,5 +1,15 @@
+برای حل این مشکل، دو کار اصلی انجام دادم:
+۱. دکمه «🛒 خرید سلف» را تغییر دادم تا به جای رفتن به بخش خرید الماس، متن راهنمای فعالسازی را نشان دهد.
+۲. یک دکمه شیشه‌ای (Reply Keyboard) پایین صفحه اضافه کردم که کاربر با زدن آن، شماره خود را بدون نیاز به تایپ ارسال می‌کند (دقیقاً همان پیامی که تلگرام برای اشتراک‌گذاری شماره می‌دهد).
+۳. مشکل خرید الماس برای ادمین را هم برطرف کردم (قبلاً ادمین نمی‌توانست عدد وارد کند چون ربات آن را دستور مدیریتی فرض می‌کرد).
+
+**نکته مهم:** برای جلوگیری از ارور قبلی، حتماً از دکمه **Copy** که در گوشه بالا سمت راست کد قرار دارد استفاده کنید و کل فایل قبلی را پاک کرده و این را جایگزین کنید.
+
+کل کد اصلاح‌شده:
+
+```python
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
 import json, os, asyncio, subprocess, sys, time, threading, random
 import html
@@ -18,7 +28,7 @@ async def safe_edit_message(message, *args, **kwargs):
 
 user_temp_codes = {}
 active_clients = {}
-BOT_TOKEN = "8868043854:AAHblyKRa-DbGHefUp7q8_Zw675JTfBdgBw"
+BOT_TOKEN = "8876742932:AAHkfGQMsNEDH_bSQemz5p4NLdMtJOTOiTM"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 ADMIN_ID = 7845464086
@@ -33,15 +43,15 @@ os.makedirs("sessions", exist_ok=True)
 
 # لیست کانال ها کم یا زیاد میتونید کنید بدون @
 FORCE_CHANNELS = [
-    "SelfPersiangulf",
+    "SH0PAL1",
 ]
 
 COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
 TOMAN_PER_COIN = 50000 / 1440
 card_info = {
-    "card_number": "6277601405245190",
-    "card_owner":  "زارعان",
-    "bank_name": "پست بانک"
+    "card_number": "6037-1234-1234-1234",
+    "card_owner": "نام صاحب کارت",
+    "bank_name": "نام بانک"
 }
 
 bot = Client("bot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
@@ -1194,7 +1204,7 @@ def create_main_menu(user_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(
             f"{wide}🛒 خرید سلف{wide}",
-            callback_data="increase_balance",
+            callback_data="activation_guide",  # تغییر به راهنمای فعالسازی
             style=KeyboardButtonStyle(bg_success=True)
         )],
         [
@@ -1281,7 +1291,7 @@ async def show_main_menu(client, chat_id, user):
 
 {f"📱 **شماره:** `{phone}`" if phone else "⚠️ **شماره ثبت نشده**"}
 
-💡 برای شروع روی «فعالسازی» کلیک کنید.
+💡 برای شروع روی «خرید سلف» کلیک کنید.
 {MENU_WIDTH_PAD}"""
 
     await client.send_message(chat_id, welcome_text, reply_markup=keyboard)
@@ -1370,7 +1380,7 @@ async def callback_handler(client, callback_query):
             "💡 هر 1 سکه معادل 1 ساعت زمان استفاده از سلف است."
         )
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛒 خرید سلف", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
+            [InlineKeyboardButton("🛒 خرید سلف", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))],
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
         ])
         await safe_edit_message(callback_query.message, guide_text, reply_markup=keyboard)
@@ -1463,7 +1473,28 @@ async def callback_handler(client, callback_query):
         await admin_callback_handler(client, callback_query)
         return
 
-    if data == "login":
+    if data == "activation_guide":
+        text = (
+            "🚀 **فعالسازی**\n\n"
+            "𝟏 ـ شما ابتدا الماس خود را از قسمت خرید الماس شارژ میکنید💎\n\n"
+            "𝟐 ـ سپس با زدن روی دکمه «📱 ارسال شماره» کد تلگرام برای شما ارسال میشود.. 📥\n\n"
+            "𝟑 ـ کد را به این صورت وارد میکنید 3.5.9.0.1 ، در صورت داشتن رمز دو مرحله ای آن را از شما میخواهد و آن را وارد میکنید.. 🔤\n\n"
+            "𝟒 ـ سلف روی اکانت شما با موفقیت فعال میشود .\n\n"
+            "𝟓 - دکمه شیشه ای رنگ ابی فعاسازی با 2 الماس"
+        )
+        # دکمه شیشه‌ای (ReplyKeyboard) برای ارسال خودکار شماره
+        reply_kb = ReplyKeyboardMarkup(
+            [
+                [KeyboardButton("📱 ارسال شماره من برای فعالسازی", request_contact=True)],
+                [KeyboardButton("🔙 بازگشت به منو")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await callback_query.message.reply_text(text, reply_markup=reply_kb)
+        await callback_query.answer()
+    
+    elif data == "login":
         credits = db.get("credits", user_id, 0)
         if credits <= 0:
             await safe_edit_message(callback_query.message, 
@@ -1593,7 +1624,7 @@ async def callback_handler(client, callback_query):
                 "❌ **شماره تلفن ثبت نشده است!**\n\n"
                 "لطفا ابتدا از طریق دکمه «فعالسازی» شماره خود را ثبت کنید.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("● فعالسازی ●", callback_data="login", style=KeyboardButtonStyle(bg_success=True))],
+                    [InlineKeyboardButton("● فعالسازی ●", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))],
                     [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
                 ])
             )
@@ -1674,7 +1705,7 @@ async def callback_handler(client, callback_query):
                 "❌ **شماره تلفن ثبت نشده است!**\n\n"
                 "لطفا ابتدا از طریق دکمه «فعالسازی» شماره خود را ثبت کنید.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("● فعالسازی ●", callback_data="login", style=KeyboardButtonStyle(bg_success=True))],
+                    [InlineKeyboardButton("● فعالسازی ●", callback_data="activation_guide", style=KeyboardButtonStyle(bg_success=True))],
                     [InlineKeyboardButton("🔙 بازگشت", callback_data="self_management", style=KeyboardButtonStyle(bg_primary=True))]
                 ])
             )
@@ -1772,6 +1803,50 @@ async def handle_admin_input(client, message: Message):
     user_id = message.from_user.id
     amount = int(message.text)
     
+    # ✅ بررسی ادمین در حال خرید سکه
+    if db.get("temp_data", f"waiting_coins_{user_id}"):
+        try:
+            coins_amount = int(message.text)
+            if coins_amount <= 0:
+                await message.reply_text("❌ تعداد سکه باید بیشتر از صفر باشد")
+                return
+            
+            toman_amount = coins_amount * TOMAN_PER_COIN
+            
+            payment_data = {
+                "user_id": user_id,
+                "coins": coins_amount,
+                "toman": toman_amount,
+                "timestamp": time.time(),
+                "status": "pending",
+                "first_name": message.from_user.first_name or "",
+                "username": message.from_user.username or ""
+            }
+            
+            db.set("payments", user_id, payment_data)
+            db.delete("temp_data", f"waiting_coins_{user_id}")
+            
+            payment_text = (
+                f"💳 **برای پرداخت لطفا مبلغ {toman_amount:,.0f} تومان به حساب زیر واریز کنید:**\n\n"
+                f"🏦 **بانک:** {card_info['bank_name']}\n"
+                f"🔢 **شماره کارت:** `{card_info['card_number']}`\n"
+                f"👤 **به نام:** {card_info['card_owner']}\n\n"
+                f"💎 **تعداد سکه دریافتی:** {coins_amount} سکه\n\n"
+                f"📸 **پس از واریز، رسید یا عکس پرداخت را ارسال کنید**\n"
+                f"⏰ پرداخت شما حداکثر تا 24 ساعت بررسی خواهد شد"
+            )
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 انصراف", callback_data="increase_balance")]
+            ])
+            
+            await message.reply_text(payment_text, reply_markup=keyboard)
+            db.set("temp_data", f"waiting_payment_proof_{user_id}", True)
+            
+        except ValueError:
+            await message.reply_text("❌ لطفا یک عدد معتبر وارد کنید")
+        return
+
     if db.get("temp_data", f"admin_global_coins_{user_id}"):
         db.delete("temp_data", f"admin_global_coins_{user_id}")
         users = db.get_all("users")
@@ -2057,6 +2132,63 @@ async def check_join(client, callback_query):
         "❌ هنوز عضو همه کانال‌ها نیستید!",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+
+# هندلر دکمه شیشه‌ای بازگشت به منو
+@bot.on_message(filters.private & filters.regex(r'^🔙 بازگشت به منو$'))
+async def back_to_main_from_reply(client, message: Message):
+    await message.reply_text("برگشت به منو اصلی...", reply_markup=ReplyKeyboardRemove())
+    await show_main_menu(client, message.chat.id, message.from_user)
+
+# هندلر دریافت شماره از دکمه شیشه‌ای (Contact)
+@bot.on_message(filters.contact & filters.private)
+async def handle_contact(client, message: Message):
+    user_id = message.from_user.id
+    phone = message.contact.phone_number
+    
+    if not phone.startswith('+'):
+        phone = '+' + phone
+        
+    credits = db.get("credits", user_id, 0)
+    if credits <= 0:
+        await message.reply_text(f"❌ سکه کافی ندارید!\nسکه های شما: {credits}\nلطفا از منوی خرید الماس اقدام کنید.", reply_markup=ReplyKeyboardRemove())
+        await show_main_menu(client, message.chat.id, message.from_user)
+        return
+    
+    if user_id in active_clients:
+        try:
+            await active_clients[user_id].disconnect()
+            del active_clients[user_id]
+        except:
+            pass
+    
+    try:
+        session_name = f"sessions/{user_id}"
+        temp_client = Client(session_name, api_id=API_ID, api_hash=API_HASH)
+        await temp_client.connect()
+        
+        active_clients[user_id] = temp_client
+        sent_code = await temp_client.send_code(phone)
+        user_data = db.get("users", user_id, {})
+        user_data["phone"] = phone
+        db.set("users", user_id, user_data)
+        
+        await message.reply_text(
+            "✅ **کد تأیید ارسال شد**\n\n"
+            "🔢 **کد ۵ رقمی را با دکمه‌های زیر وارد کنید:**\n\n"
+            f"<b><code>{format_code_display('')}</code></b>\n\n"
+            "📱 کد ارسال شده به شماره شما",
+            reply_markup=create_numpad_keyboard(),
+            parse_mode=enums.ParseMode.HTML
+        )
+        
+        db.set("temp_data", user_id, {
+            "phone": phone, 
+            "phone_code_hash": sent_code.phone_code_hash,
+            "client_active": True
+        })
+        
+    except Exception as e:
+        await message.reply_text(f"❌ **خطا:** {str(e)}", reply_markup=ReplyKeyboardRemove())
 
 @bot.on_message(filters.private & filters.regex(r'^\+\d{10,15}$'))
 async def handle_phone(client, message: Message):
