@@ -1134,9 +1134,10 @@ async def ping_command(client: Client, message: Message):
     ping_time = (end_time - start_time).microseconds / 1000
     await ping_msg.edit(f"**🏓 پونگ!**\n**⏱ سرعت: {ping_time:.2f} ms**")
 
-# ✅ هندلر پنل با مدیریت خطا (رفع مشکل هنگ کردن سلف بات)
+# ✅ هندلر پنل با مدیریت خطای پیشرفته
 @app.on_message(filters.me & filters.command(["پنل", "panel"], prefixes=""))
 async def panel_command(client, message: Message):
+    loading_msg = await message.edit_text("⏳ **در حال ارتباط با ربات هلپر...**")
     try:
         results = await client.get_inline_bot_results(bot_username, "panel")
         if results and results.results:
@@ -1145,16 +1146,21 @@ async def panel_command(client, message: Message):
                 query_id=results.query_id,
                 result_id=results.results[0].id
             )
-            await message.delete()
+            await loading_msg.delete()
         else:
-            await message.reply_text("❌ پنل یافت نشد. ربات هلپر ممکن است خاموش باشد.")
-            await asyncio.sleep(3)
-            await message.delete()
+            await loading_msg.edit_text("❌ **پنل یافت نشد**\nربات هلپر روشن است اما پاسخی برای پنل ارسال نکرد.")
     except Exception as e:
-        print(f"Panel Error: {e}")
-        await message.reply_text(f"❌ خطا در باز کردن پنل:\n`{str(e)}`\n\nلطفا مطمئن شوید ربات هلپر روشن است.")
-        await asyncio.sleep(5)
-        await message.delete()
+        error_msg = str(e)
+        if "BOT_RESPONSE_TIMEOUT" in error_msg or "Timeout" in error_msg:
+            await loading_msg.edit_text(
+                "❌ **ربات هلپر در زمان مقرر پاسخ نداد! (Timeout)**\n\n"
+                "🔧 **دلایل احتمالی و راه‌حل:**\n"
+                "1️⃣ ربات هلپر (`helper.py`) در حال اجرا نیست یا در لاگ‌ها ارور داده و خاموش شده است. (لاگ سرور را چک کنید)\n"
+                "2️⃣ سرور شما کند است و ربات هلپر نمی‌تواند سریع پاسخ دهد.\n"
+                "3️⃣ در BotFather دستور `/setinline` را بزنید و مطمئن شوید یک پیام راهنما (مثلاً `Panel`) ثبت کرده‌اید."
+            )
+        else:
+            await loading_msg.edit_text(f"❌ **خطا در باز کردن پنل:**\n`{error_msg}`")
 
 @app.on_message(filters.me & filters.regex(r'^حذف ریکت$'))
 async def remove_reaction_command(client, message):
