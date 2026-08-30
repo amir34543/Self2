@@ -18,7 +18,7 @@ async def safe_edit_message(message, *args, **kwargs):
 
 user_temp_codes = {}
 active_clients = {}
-BOT_TOKEN = "8876742932:AAHkfGQMsNEDH_bSQemz5p4NLdMtJOTOiTM"
+BOT_TOKEN = "8868043854:AAHblyKRa-DbGHefUp7q8_Zw675JTfBdgBw"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 ADMIN_ID = 7845464086
@@ -32,15 +32,15 @@ os.makedirs("sessions", exist_ok=True)
 
 # لیست کانال ها کم یا زیاد میتونید کنید بدون @
 FORCE_CHANNELS = [
-    "SH0PAL1",
+    "t.me/SelfPersiangulf",
 ]
 
 COIN_RATE = 1440  # 1440 سکه = 50,000 تومان
 TOMAN_PER_COIN = 50000 / 1440
 card_info = {
-    "card_number": "6037-1234-1234-1234",
-    "card_owner": "نام صاحب کارت",
-    "bank_name": "نام بانک"
+    "card_number": "6277-6014-0524-5190",
+    "card_owner": "زارعان",
+    "bank_name": "پست بانک"
 }
 
 bot = Client("bot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
