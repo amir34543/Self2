@@ -15,7 +15,7 @@ import sys
 from pyrogram.types import ChatMemberUpdated
 from pyrogram.errors import FloodWait
 
-bot_username = "Helpselfbotvippersian_bot"
+bot_username = "@Helperbotpersian_bot"
 
 USER_ID = None
 PHONE = None
