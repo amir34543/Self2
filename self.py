@@ -23,7 +23,7 @@ from pyrogram.errors import FloodWait
 # تنظیمات اولیه و متغیرهای سراسری
 # ==============================================================================
 
-bot_username = "@Helperbotpersian_bot" # یوزرنیم ربات هلپر بدون @
+bot_username = "Helperbotpersian_bot" # یوزرنیم ربات هلپر بدون @
 
 USER_ID = None
 PHONE = None
