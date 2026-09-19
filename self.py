@@ -1,26 +1,21 @@
 # ==============================================================================
-# سیستم مدیریت سلف بات حرفه‌ای PersianGulf SelfBot
-# نسخه: 5.0.2 - رفع قطع شدن دستور پنل
+#  PersianGulf SelfBot — نسخه 7.0.0 «شاهکار»
+#  پنل دوطبقه + بیش از ۴۰ قابلیت جدید
 # ==============================================================================
 
 import requests
 import urllib.parse
 from pyrogram import Client, filters, StopPropagation
-from pyrogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-import os
-import asyncio
-import random
-import re
+from pyrogram.types import (Message, ReplyKeyboardMarkup, KeyboardButton,
+                            ReplyKeyboardRemove, ChatPermissions)
+import os, asyncio, random, re, json, sys, time
 from datetime import datetime
 import pytz
 from pyrogram import enums
-from pyrogram.raw import functions
-import json
-import sys
-from pyrogram.types import ChatPermissions, ChatPrivileges
+from pyrogram.raw import functions as rawfn
 from pyrogram.errors import FloodWait
 
-bot_username = "Helperbotpersian_bot" # یوزرنیم ربات هلپر بدون @
+bot_username = "Helperbotpersian_bot"  # یوزرنیم ربات هلپر بدون @
 
 USER_ID = None
 PHONE = None
@@ -32,149 +27,203 @@ if len(sys.argv) > 2: PHONE = sys.argv[2]
 if len(sys.argv) > 3: API_ID = int(sys.argv[3])
 if len(sys.argv) > 4: API_HASH = sys.argv[4]
 
-if USER_ID: session_name = f"sessions/{USER_ID}"
-else: session_name = "self"
-
+session_name = f"sessions/{USER_ID}" if USER_ID else "self"
 app = Client(session_name, api_id=API_ID, api_hash=API_HASH)
 
-# ================== تنظیمات اولیه ==================
+# ================== فایل‌ها و پوشه‌ها ==================
 SAVED_PHOTOS_DIR = "saved_photos"
 INSULTS_FILE = "insults.txt"
 ENEMIES_FILE = "enemies.txt"
 BACKUPS_DIR = "backups"
 NOTES_FILE = "notes.json"
-
 os.makedirs(SAVED_PHOTOS_DIR, exist_ok=True)
 os.makedirs(BACKUPS_DIR, exist_ok=True)
 
-action_settings = {"typing": False, "upload_photo": False, "record_audio": False, "upload_video": False, "upload_document": False, "record_video": False, "upload_audio": False, "playing": False, "choose_contact": False, "find_location": False, "choose_sticker": False}
-ACTION_MAP = {"typing": enums.ChatAction.TYPING, "upload_photo": enums.ChatAction.UPLOAD_PHOTO, "record_audio": enums.ChatAction.RECORD_AUDIO, "upload_video": enums.ChatAction.UPLOAD_VIDEO, "upload_document": enums.ChatAction.UPLOAD_DOCUMENT, "record_video": enums.ChatAction.RECORD_VIDEO, "upload_audio": enums.ChatAction.UPLOAD_AUDIO, "playing": enums.ChatAction.PLAYING, "choose_contact": enums.ChatAction.CHOOSE_CONTACT, "find_location": enums.ChatAction.FIND_LOCATION, "choose_sticker": enums.ChatAction.CHOOSE_STICKER}
+def jload(path, default):
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                c = f.read().strip()
+                return json.loads(c) if c else default
+    except Exception:
+        pass
+    return default
+
+def jsave(path, data):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
+
+# ================== وضعیت‌ها ==================
+action_settings = {"typing": False, "upload_photo": False, "record_audio": False, "upload_video": False,
+                   "upload_document": False, "record_video": False, "upload_audio": False, "playing": False,
+                   "choose_contact": False, "find_location": False, "choose_sticker": False}
+ACTION_MAP = {"typing": enums.ChatAction.TYPING, "upload_photo": enums.ChatAction.UPLOAD_PHOTO,
+              "record_audio": enums.ChatAction.RECORD_AUDIO, "upload_video": enums.ChatAction.UPLOAD_VIDEO,
+              "upload_document": enums.ChatAction.UPLOAD_DOCUMENT, "record_video": enums.ChatAction.RECORD_VIDEO,
+              "upload_audio": enums.ChatAction.UPLOAD_AUDIO, "playing": enums.ChatAction.PLAYING,
+              "choose_contact": enums.ChatAction.CHOOSE_CONTACT, "find_location": enums.ChatAction.FIND_LOCATION,
+              "choose_sticker": enums.ChatAction.CHOOSE_STICKER}
 
 format_settings = {"بولد": False, "ایتالیک": False, "زیر خط": False, "خط‌ خورده": False, "اسپویلر": False, "کد": False}
+html_tags = {"بولد": "<b>{}</b>", "ایتالیک": "<i>{}</i>", "زیر خط": "<u>{}</u>",
+             "خط‌ خورده": "<s>{}</s>", "اسپویلر": "<spoiler>{}</spoiler>", "کد": "<code>{}</code>"}
 lock_settings = {"همه": False, "مدیا": False, "استیکر": False, "فوروارد": False, "ویس": False, "پیام": False, "فایل": False}
-html_tags = {"بولد": "<b>{}</b>", "ایتالیک": "<i>{}</i>", "زیر خط": "<u>{}</u>", "خط‌ خورده": "<s>{}</s>", "اسپویلر": "<spoiler>{}</spoiler>", "کد": "<code>{}</code>"}
 
 user_menu_mode = {}
 always_online_enabled = False
 tag_logger_on = False
 anti_login_enabled = False
-enemies = set()
-auto_reactions = {}
+afk_mode = False
+afk_reason = ""
+afk_notified = set()
+signature_on = False
+signature_text = "• 『 پیام من 』"
+auto_delete_seconds = 0
+banner_active = None
+banner_interval_min = 5
+last_banner = 0
+START_TIME = time.time()
+
 user_time_status = {}
-banners = {}
-active_broadcasts = {}
-banner_counter = 1
 user_original_names = {}
-user_fonts = {}
-
-def load_notes():
-    if os.path.exists(NOTES_FILE):
-        try:
-            with open(NOTES_FILE, 'r', encoding='utf-8') as f: return json.load(f)
-        except: return {}
-    return {}
-
-def save_notes(notes):
-    with open(NOTES_FILE, 'w', encoding='utf-8') as f: json.dump(notes, f, ensure_ascii=False)
+user_fonts = {int(k): v for k, v in jload("fonts.json", {}).items()}
+auto_reactions = jload("mmauto_reactions.json", {})
+auto_replies = jload("auto_replies.json", {})
+notes = jload(NOTES_FILE, {})
+banners = jload("banners.json", {})
 
 def load_insults():
     try:
         if os.path.exists(INSULTS_FILE):
-            with open(INSULTS_FILE, 'r', encoding='utf-8') as f: return [line.strip() for line in f.readlines() if line.strip()]
-        return []
-    except: return []
+            with open(INSULTS_FILE, "r", encoding="utf-8") as f:
+                return [l.strip() for l in f.readlines() if l.strip()]
+    except Exception:
+        pass
+    return []
 
-def save_insults(insults_list):
+def save_insults(lst):
     try:
-        with open(INSULTS_FILE, 'w', encoding='utf-8') as f:
-            for insult in insults_list: f.write(insult + '\n')
+        with open(INSULTS_FILE, "w", encoding="utf-8") as f:
+            for i in lst: f.write(i + "\n")
         return True
-    except: return False
+    except Exception:
+        return False
 
 def load_enemies():
     try:
         if os.path.exists(ENEMIES_FILE):
-            with open(ENEMIES_FILE, 'r', encoding='utf-8') as f: return set(int(line.strip()) for line in f.readlines() if line.strip())
-        return set()
-    except: return set()
+            with open(ENEMIES_FILE, "r", encoding="utf-8") as f:
+                return set(int(l.strip()) for l in f.readlines() if l.strip())
+    except Exception:
+        pass
+    return set()
 
-def save_enemies(enemies_set):
+def save_enemies(es):
     try:
-        with open(ENEMIES_FILE, 'w', encoding='utf-8') as f:
-            for enemy_id in enemies_set: f.write(str(enemy_id) + '\n')
+        with open(ENEMIES_FILE, "w", encoding="utf-8") as f:
+            for e in es: f.write(str(e) + "\n")
         return True
-    except: return False
-
-def save_reactions():
-    try:
-        with open("mmauto_reactions.json", "w", encoding="utf-8") as f: json.dump(auto_reactions, f, ensure_ascii=False, indent=4)
-        return True
-    except: return False
-
-def load_reactions():
-    try:
-        if os.path.exists("mmauto_reactions.json"):
-            with open("mmauto_reactions.json", "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                return json.loads(content) if content else {}
-        return {}
-    except: return {}
+    except Exception:
+        return False
 
 enemies = load_enemies()
-auto_reactions = load_reactions()
+
+FULL_PERMS = ChatPermissions(can_send_messages=True, can_send_media_messages=True, can_send_polls=True,
+                             can_send_other_messages=True, can_add_web_page_previews=True,
+                             can_change_info=True, can_invite_users=True, can_pin_messages=True)
+NO_PERMS = ChatPermissions(can_send_messages=False, can_send_media_messages=False, can_send_polls=False,
+                           can_send_other_messages=False, can_add_web_page_previews=False)
+
+# ================== فونت زمان / فانتزی / جک ==================
+TIME_FONTS = {1: "𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗", 2: "𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟯", 3: "０１２３４５６７８９",
+              4: "𝟢𝟣𝟤𝟥𝟦𝟧𝟨𝟩𝟪𝟫", 5: "𝟘𝟙𝟚𝟛𝟜𝟝𝟞𝟟𝟠𝟡", 6: "dashed"}
+
+def fa_time_str(fid=1):
+    t = datetime.now(pytz.timezone("Asia/Tehran")).strftime("%H:%M")
+    if fid == 6:
+        return "".join(ch + "\u0334" for ch in t)
+    digits = TIME_FONTS.get(fid, TIME_FONTS[1])
+    return t.translate(str.maketrans("0123456789", digits))
+
+def _alpha(lo, up):
+    return str.maketrans("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", lo + up)
+
+FANCY_TRANS = {
+    1: _alpha("𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇", "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"),
+    2: _alpha("𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻", "𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡"),
+    3: _alpha("𝕒𝕓𝕔𝕕𝕖𝕗𝕘𝕙𝕚𝕛𝕜𝕝𝕞𝕟𝕠𝕡𝕢𝕣𝕤𝕥𝕦𝕧𝕨𝕩𝕪𝕫", "𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃𝕄ℕ𝕆ℙℚℝ𝕊𝕋𝕌𝕍𝕎𝕏𝕐ℤ"),
+    4: _alpha("ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ", "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ"),
+    5: _alpha("ⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ", "ⒶⒷⒸⒹⒺⒻⒼⒽⒾⒿⓀⓁⓂⓃⓄⓅⓆⓇⓈⓉⓊⓋⓌⓍⓎⓏ"),
+    6: _alpha("𝖆𝖇𝖈𝖉𝖊𝖋𝖌𝖍𝖎𝖏𝖐𝖑𝖒𝖓𝖔𝖕𝖖𝖗𝖘𝖙𝖚𝖛𝖜𝖝𝖞𝖟", "𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅"),
+}
+WRAPPERS = {1: ("꧁ ", " ꧂"), 2: ("✦ ", " ✦"), 3: ("༺ ", " ༻"), 4: ("「 ", " 」"), 5: ("★ ", " ★"), 6: ("『 ", " 』")}
+
+JOKES = [
+    "به یارو میگن چرا شب‌ها در اتاقت رو قفل می‌کنی؟ میگه تا صبح کسی خوابش نپره! 😂",
+    "معلم: یک جمله بگو که توش «خواب» باشد. دانش‌آموز: دیروز ۴۰ نفر در کلاس خواب دیدند! 😴",
+    "یارو به دکتر میگه هر جا میرم بقیه از من کپی میبرند! دکتر: خب عکس بنداز جلو نری 😂",
+    "گفتند چرا گوشیت رو تو یخچال میذاری؟ گفت اس‌ام‌اس‌ها سرد بشه بهتره! 🥶",
+    "به یارو گفتن چرا پشت چراغ قرمز بوق زدی؟ گفت داشتم برف‌پاک‌کن‌ها رو پارک می‌کردم! 🚗",
+    "یه بار یارو تو آزمایشگاه آب را به خودش زد، از آن به بعد شد ابرمرد... نه اشتباه کردم، شد مرطوب! 💧",
+]
+
+CMD_STARTERS = ("بایو", "یوزر", "نام", "ترجمه", "آب", "بارکد", "دانلود", "قیمت", "اسپم", "فحش", "دشمن",
+                "ریکت", "اینستا", "پینگ", "پاسخ", "افک", "همگانی", "حذف", "سیو", "یادداشت", "ویس", "حساب",
+                "آمار", "سشن", "خروج", "بلاک", "آنبلاک", "ساخت", "پین", "آنپین", "کیک", "بن", "آنبن",
+                "افزودن", "سکوت", "رفع", "مخاطب", "شماره", "تاس", "ریسه", "جک", "شانس", "قلم", "ویوئر",
+                "فضول", "سلامت", "ویرایش", "تنظیم", "لیست", "فرمت", "انتی", "آنلاین", "شنود", "تایم",
+                "پاکسازی", "منوی", "بنر", "زمان", "وضعیت", "ریست", "قفل", "بازکردن", "پروفایل", "عکس",
+                "پنل", "panel", "منش", "امضا")
 
 # ==============================================================================
-# ★★★ هندلر پنل (انتقال به بالا برای جلوگیری از تداخل) ★★★
+# ★ هندلر پنل (اول از همه تا با بقیه تداخل نکند) ★
 # ==============================================================================
 @app.on_message(filters.me & filters.command(["پنل", "panel"], prefixes=""))
 async def panel_command(client, message):
-    """باز کردن پنل مدیریت از طریق ربات هلپر"""
-    print(f"[DEBUG] دستور پنل توسط {message.from_user.id} ارسال شد.") # برای دیباگ
-    loading_msg = await message.edit_text("⏳ **در حال ارتباط با ربات هلپر...**")
+    loading_msg = await message.edit_text("⏳ **در حال باز کردن پنل...**")
     try:
         results = await client.get_inline_bot_results(bot_username, "panel")
-        print(f"[DEBUG] پاسخ هلپر دریافت شد. تعداد ریسالت‌ها: {len(results.results) if results else 0}")
         if results and results.results:
-            await client.send_inline_bot_result(
-                chat_id=message.chat.id,
-                query_id=results.query_id,
-                result_id=results.results[0].id
-            )
+            await client.send_inline_bot_result(chat_id=message.chat.id,
+                                                query_id=results.query_id,
+                                                result_id=results.results[0].id)
             await loading_msg.delete()
         else:
-            await loading_msg.edit_text("❌ **پنل یافت نشد**\nربات هلپر روشن است اما پاسخی برای پنل ارسال نکرد.")
+            await loading_msg.edit_text("❌ **پنل یافت نشد**\nربات هلپر روشن است اما پاسخی نداد.")
     except Exception as e:
-        error_msg = str(e)
-        print(f"[DEBUG] خطا در باز کردن پنل: {error_msg}")
-        if "BOT_RESPONSE_TIMEOUT" in error_msg or "Timeout" in error_msg:
-            await loading_msg.edit_text(
-                "❌ **ربات هلپر پاسخ نداد! (Timeout)**\n\n"
-                "🔧 **دلایل قطعی:**\n"
-                "1️⃣ ربات `helper.py` در سرور روشن نیست.\n"
-                "2️⃣ در BotFather دستور `/setinline` را نزدیدید یا اینلاین مود خاموش است.\n"
-                "3️⃣ یوزرنیم ربات هلپر در کد `self.py` اشتباه وارد شده است."
-            )
+        err = str(e)
+        if "BOT_RESPONSE_TIMEOUT" in err or "Timeout" in err:
+            await loading_msg.edit_text("❌ **هلپر پاسخ نداد (Timeout)**\n\n1️⃣ helper.py روشن نیست\n2️⃣ `/setinline` در BotFather تنظیم نشده\n3️⃣ یوزرنیم هلپر در self.py اشتباه است")
         else:
-            await loading_msg.edit_text(f"❌ **خطا در باز کردن پنل:**\n`{error_msg}`")
-    
-    raise StopPropagation # جلوگیری از اجرای سایر هندلرها
+            await loading_msg.edit_text(f"❌ **خطا:**\n`{err}`")
+    raise StopPropagation
 
 # ================== منوهای شیشه‌ای ==================
 def get_format_keyboard():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("✅ بولد" if format_settings.get("بولد") else "بولد"), KeyboardButton("✅ ایتالیک" if format_settings.get("ایتالیک") else "ایتالیک"), KeyboardButton("✅ زیر خط" if format_settings.get("زیر خط") else "زیر خط")],
-        [KeyboardButton("✅ خط‌ خورده" if format_settings.get("خط‌ خورده") else "خط‌ خورده"), KeyboardButton("✅ اسپویلر" if format_settings.get("اسپویلر") else "اسپویلر"), KeyboardButton("✅ کد" if format_settings.get("کد") else "کد")],
+        [KeyboardButton("✅ بولد" if format_settings["بولد"] else "بولد"),
+         KeyboardButton("✅ ایتالیک" if format_settings["ایتالیک"] else "ایتالیک"),
+         KeyboardButton("✅ زیر خط" if format_settings["زیر خط"] else "زیر خط")],
+        [KeyboardButton("✅ خط‌ خورده" if format_settings["خط‌ خورده"] else "خط‌ خورده"),
+         KeyboardButton("✅ اسپویلر" if format_settings["اسپویلر"] else "اسپویلر"),
+         KeyboardButton("✅ کد" if format_settings["کد"] else "کد")],
         [KeyboardButton("🟢 معمولی (ریست)"), KeyboardButton("❌ بستن منو")]
     ], resize_keyboard=True)
 
 def get_action_keyboard():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("✅ تایپ" if action_settings.get("typing") else "تایپ"), KeyboardButton("✅ آپلود عکس" if action_settings.get("upload_photo") else "آپلود عکس")],
-        [KeyboardButton("✅ ضبط ویس" if action_settings.get("record_audio") else "ضبط ویس"), KeyboardButton("✅ بازی" if action_settings.get("playing") else "بازی")],
+        [KeyboardButton("✅ تایپ" if action_settings["typing"] else "تایپ"),
+         KeyboardButton("✅ آپلود عکس" if action_settings["upload_photo"] else "آپلود عکس")],
+        [KeyboardButton("✅ ضبط ویس" if action_settings["record_audio"] else "ضبط ویس"),
+         KeyboardButton("✅ بازی" if action_settings["playing"] else "بازی")],
         [KeyboardButton("🔴 خاموش (ریست)"), KeyboardButton("❌ بستن منو")]
     ], resize_keyboard=True)
 
-def get_settings_keyboard():
+def get_quick_settings_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("✅ آنلاین" if always_online_enabled else "🌐 آنلاین")],
         [KeyboardButton("✅ شنود" if tag_logger_on else "👂 شنود")],
@@ -197,7 +246,7 @@ async def open_action_menu(client, message):
 @app.on_message(filters.me & filters.command("منوی تنظیمات", prefixes=""))
 async def open_settings_menu(client, message):
     user_menu_mode[message.from_user.id] = "settings"
-    await message.reply_text("⚙️ **منوی تنظیمات سریع فعال شد**", reply_markup=get_settings_keyboard())
+    await message.reply_text("⚙️ **منوی تنظیمات سریع فعال شد**", reply_markup=get_quick_settings_keyboard())
     await message.delete()
 
 @app.on_message(filters.me & filters.regex(r'^(بولد|✅ بولد|ایتالیک|✅ ایتالیک|زیر خط|✅ زیر خط|خط‌ خورده|✅ خط‌ خورده|اسپویلر|✅ اسپویلر|کد|✅ کد|🟢 معمولی \(ریست\)|تایپ|✅ تایپ|آپلود عکس|✅ آپلود عکس|ضبط ویس|✅ ضبط ویس|بازی|✅ بازی|🔴 خاموش \(ریست\)|🌐 آنلاین|✅ آنلاین|👂 شنود|✅ شنود|🛡️ انتی لاگین|✅ انتی لاگین|❌ بستن منو)$'))
@@ -205,13 +254,11 @@ async def handle_glass_menus(client, message):
     global always_online_enabled, tag_logger_on, anti_login_enabled
     user_id = message.from_user.id
     text = message.text
-    
     if text == "❌ بستن منو":
         user_menu_mode[user_id] = None
         await client.send_message(user_id, "✅ منو بسته شد.", reply_markup=ReplyKeyboardRemove())
         await message.delete()
         raise StopPropagation
-        
     mode = user_menu_mode.get(user_id)
     if mode == "text":
         if "بولد" in text: format_settings["بولد"] = not format_settings["بولد"]
@@ -239,60 +286,517 @@ async def handle_glass_menus(client, message):
         if "آنلاین" in text: always_online_enabled = not always_online_enabled
         elif "شنود" in text: tag_logger_on = not tag_logger_on
         elif "انتی لاگین" in text: anti_login_enabled = not anti_login_enabled
-        await client.send_message(user_id, "🔄 تنظیمات آپدیت شد", reply_markup=get_settings_keyboard())
+        await client.send_message(user_id, "🔄 تنظیمات آپدیت شد", reply_markup=get_quick_settings_keyboard())
         await message.delete()
         raise StopPropagation
 
+# ================== فرمت خودکار + امضا (پیام‌های خروجی) ==================
 @app.on_message(filters.me & filters.text)
-async def auto_format_if_menu_active(client, message):
+async def outgoing_text_handler(client, message):
+    text = message.text or ""
     if user_menu_mode.get(message.from_user.id) == "text" and any(format_settings.values()):
-        formatted_text = message.text
+        ft = text
         for fmt, is_on in format_settings.items():
-            if is_on: formatted_text = html_tags.get(fmt, "{}").format(formatted_text)
-        try: await message.edit_text(formatted_text, parse_mode=enums.ParseMode.HTML)
-        except: pass
+            if is_on: ft = html_tags.get(fmt, "{}").format(ft)
+        try:
+            await message.edit(ft, parse_mode=enums.ParseMode.HTML)
+        except Exception:
+            pass
+        return
+    if signature_on and not text.startswith(CMD_STARTERS) and not text.endswith(signature_text):
+        try:
+            await message.edit(text + "\n\n" + signature_text)
+        except Exception:
+            pass
 
-# ================== قابلیت‌های اضافه ==================
-@app.on_message(filters.me & filters.command("پروفایل", prefixes="") & filters.regex(r"^پروفایل$"))
+@app.on_message(filters.me & ~filters.service)
+async def auto_delete_own_handler(client, message):
+    if auto_delete_seconds > 0:
+        async def _later():
+            await asyncio.sleep(auto_delete_seconds)
+            try: await message.delete()
+            except Exception: pass
+        asyncio.create_task(_later())
+
+# ================== 🪄 پروفایل ==================
+@app.on_message(filters.me & filters.regex(r"^پروفایل$"))
 async def set_pfp(client, message):
-    if not message.reply_to_message or not message.reply_to_message.photo: return await message.edit("❌ روی عکس ریپلای کنید")
+    if not message.reply_to_message or not message.reply_to_message.photo:
+        return await message.edit("❌ روی عکس ریپلای کنید")
     msg = await message.edit("🖼 در حال تغییر...")
     try:
         p = await message.reply_to_message.download()
         await client.set_profile_photo(photo=p); os.remove(p)
         await msg.edit("✅ عکس پروفایل تغییر کرد")
-    except Exception as e: await msg.edit(f"❌ خطا: `{e}`")
+    except Exception as e:
+        await msg.edit(f"❌ خطا: `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^حذف عکس$"))
+async def del_last_photo(client, message):
+    m = await message.edit("🗑 در حال حذف...")
+    try:
+        photos = await app.get_profile_photos("me", limit=1)
+        if photos:
+            await app.delete_profile_photos([photos[0].file_id])
+            await m.edit("✅ آخرین عکس پروفایل حذف شد")
+        else:
+            await m.edit("❌ عکسی موجود نیست")
+    except Exception as e:
+        await m.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^حذف همه عکس$"))
+async def del_all_photos(client, message):
+    m = await message.edit("🗑 در حال حذف همه عکس‌ها...")
+    try:
+        photos = await app.get_profile_photos("me", limit=100)
+        ids = [p.file_id for p in photos]
+        for i in range(0, len(ids), 90):
+            await app.delete_profile_photos(ids[i:i+90])
+        await m.edit(f"✅ {len(ids)} عکس حذف شد")
+    except Exception as e:
+        await m.edit(f"❌ `{e}`")
 
 @app.on_message(filters.me & filters.command("بایو", prefixes=""))
 async def set_bio(client, message):
     if len(message.command) < 2: return await message.edit("❌ `بایو متن`")
-    try: await client.update_profile(bio=' '.join(message.command[1:])); await message.edit("✅ بیو تغییر کرد")
+    try:
+        await app.update_profile(bio=' '.join(message.command[1:]))
+        await message.edit("✅ بیو تغییر کرد")
     except Exception as e: await message.edit(f"❌ `{e}`")
 
 @app.on_message(filters.me & filters.command("یوزر", prefixes=""))
 async def set_username(client, message):
     if len(message.command) < 2: return await message.edit("❌ `یوزر name`")
-    try: await client.set_username(message.command[1].lstrip('@')); await message.edit("✅ یوزر تغییر کرد")
+    try:
+        await app.set_username(message.command[1].lstrip('@'))
+        await message.edit("✅ یوزر تغییر کرد")
     except Exception as e: await message.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.command("نام", prefixes=""))
+async def set_name(client, message):
+    if len(message.command) < 2: return await message.edit("❌ `نام جدید` یا `نام کامل نام فامیلی`")
+    txt = message.text
+    try:
+        if txt.startswith("نام کامل "):
+            parts = txt[9:].strip().split(" ", 1)
+            await app.update_profile(first_name=parts[0], last_name=parts[1] if len(parts) > 1 else "")
+        else:
+            await app.update_profile(first_name=' '.join(message.command[1:]))
+        await message.edit("✅ نام تغییر کرد")
+    except Exception as e: await message.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.command("تایم", prefixes="") & filters.regex(r"^تایم (روشن|خاموش)$"))
+async def time_command(client, message):
+    global user_fonts
+    a = message.command[1]
+    uid = message.from_user.id
+    if a == "روشن":
+        user_time_status[uid] = True
+        user_original_names.setdefault(uid, message.from_user.first_name or "")
+        fid = user_fonts.get(uid, 1)
+        await app.update_profile(first_name=f"{user_original_names.get(uid)} {fa_time_str(fid)}")
+        await message.edit(f"✅ تایم روشن شد\n⏰ {fa_time_str(fid)}")
+    else:
+        user_time_status[uid] = False
+        if uid in user_original_names:
+            try: await app.update_profile(first_name=user_original_names[uid])
+            except Exception: pass
+        await message.edit("✅ تایم خاموش شد")
+
+@app.on_message(filters.me & filters.regex(r"^(لیست فونت|تنظیم فونت \d)$"))
+async def font_cmd(client, message):
+    global user_fonts
+    t = message.text
+    if t == "لیست فونت":
+        preview = "\n".join(f"{i} - «{fa_time_str(i)}»" for i in TIME_FONTS)
+        await message.edit(f"🔤 **فونت‌های زمان:**\n\n{preview}\n\n✅ با `تنظیم فونت شماره` انتخاب کنید")
+    else:
+        fid = int(t.split()[-1])
+        if fid in TIME_FONTS:
+            user_fonts[message.from_user.id] = fid
+            jsave("fonts.json", user_fonts)
+            await message.edit(f"✅ فونت {fid} تنظیم شد\n⏰ پیش‌نمایش: {fa_time_str(fid)}")
+
+# ================== 👥 گروه ==================
+@app.on_message(filters.me & filters.regex(r"^ساخت گروه .+"))
+async def create_group_cmd(client, message):
+    title = message.text.split(" ", 2)[2]
+    m = await message.edit("👥 در حال ساخت گروه...")
+    try:
+        await app.create_group(title, [])
+        await m.edit(f"✅ گروه «{title}» ساخته شد")
+    except Exception as e:
+        await m.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^(قفل گروه|بازکردن گروه)$"))
+async def group_lock_cmd(client, message):
+    try:
+        closed = message.text == "قفل گروه"
+        await app.set_chat_permissions(message.chat.id, NO_PERMS if closed else FULL_PERMS)
+        await message.edit("🔒 گروه قفل شد" if closed else "🔓 گروه باز شد")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^(پین|آنپین)$"))
+async def pin_cmd(client, message):
+    try:
+        if message.text == "پین":
+            if not message.reply_to_message: return await message.edit("❌ ریپلای کنید")
+            await message.reply_to_message.pin()
+            await message.edit("📌 پیام پین شد")
+        else:
+            await app.unpin_chat_message(message.chat.id)
+            await message.edit("📌 پین آخر برداشته شد")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^(کیک|بن|آنبن)$"))
+async def kick_ban_cmd(client, message):
+    if not message.reply_to_message or not message.reply_to_message.from_user:
+        return await message.edit("❌ روی پیام کاربر ریپلای کنید")
+    uid = message.reply_to_message.from_user.id
+    try:
+        if message.text == "کیک":
+            await app.ban_chat_member(message.chat.id, uid)
+            await app.unban_chat_member(message.chat.id, uid)
+            await message.edit("👢 کاربر اخراج شد")
+        elif message.text == "بن":
+            await app.ban_chat_member(message.chat.id, uid)
+            await message.edit("🔨 کاربر بن شد")
+        else:
+            await app.unban_chat_member(message.chat.id, uid)
+            await message.edit("✅ کاربر آنبن شد")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^تعداد (کانال ها|گروه ها)$"))
+async def count_chats_cmd(client, message):
+    chans = groups = 0
+    async for d in app.get_dialogs(limit=500):
+        t = d.chat.type
+        if t == enums.ChatType.CHANNEL: chans += 1
+        elif t in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP): groups += 1
+    k = message.matches[0].group(1)
+    await message.edit(f"📊 **تعداد {k}:** {chans if 'کانال' in k else groups}")
+
+@app.on_message(filters.me & filters.regex(r"^خروج همه (کانال|گروه)$"))
+async def leave_all_cmd(client, message):
+    kind = message.matches[0].group(1)
+    m = await message.edit(f"🚪 در حال خروج از همه {kind}‌ها...")
+    n = 0
+    async for d in app.get_dialogs(limit=500):
+        t = d.chat.type
+        ok = (t == enums.ChatType.CHANNEL and kind == "کانال") or (t in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP) and kind == "گروه")
+        if ok:
+            try:
+                await app.leave_chat(d.chat.id); n += 1; await asyncio.sleep(4)
+            except Exception: pass
+    await m.edit(f"✅ از {n} {kind} خارج شدید")
+
+# ================== 🤝 دعوت و مخاطب ==================
+@app.on_message(filters.me & filters.command("افزودن", prefixes=""))
+async def add_member_cmd(client, message):
+    if len(message.command) < 2: return await message.edit("❌ `افزودن @user`")
+    try:
+        await app.add_chat_members(message.chat.id, message.command[1].lstrip("@"))
+        await message.edit("✅ عضو به گروه اضافه شد")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.command("مخاطب", prefixes="") & filters.regex(r"^مخاطب \+?\d+ .+"))
+async def contact_cmd(client, message):
+    parts = message.text.split(" ", 2)
+    await message.delete()
+    await app.send_contact(message.chat.id, parts[1].lstrip("+"), parts[2])
+
+@app.on_message(filters.me & filters.regex(r"^شماره من$"))
+async def my_contact_cmd(client, message):
+    me = await app.get_me()
+    if not me.phone_number: return await message.edit("❌ شماره شما مخفی است")
+    await message.delete()
+    await app.send_contact(message.chat.id, me.phone_number, me.first_name or "من")
+
+# ================== 🔇 سکوت و بلاک ==================
+@app.on_message(filters.me & filters.regex(r"^(سکوت|رفع سکوت)$"))
+async def mute_cmd(client, message):
+    if not message.reply_to_message or not message.reply_to_message.from_user:
+        return await message.edit("❌ روی پیام کاربر ریپلای کنید")
+    uid = message.reply_to_message.from_user.id
+    try:
+        if message.text == "سکوت":
+            await app.restrict_chat_member(message.chat.id, uid, NO_PERMS)
+            await message.edit("🔇 کاربر ساکت شد")
+        else:
+            await app.restrict_chat_member(message.chat.id, uid, FULL_PERMS)
+            await message.edit("🔊 سکوت برداشته شد")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.command(["بلاک", "آنبلاک"], prefixes=""))
+async def block_cmd(client, message):
+    target = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target = message.reply_to_message.from_user.id
+    elif len(message.command) > 1:
+        target = message.command[1].lstrip("@")
+    if not target: return await message.edit("❌ ریپلای کنید یا `بلاک @user`")
+    try:
+        if message.command[0] == "بلاک":
+            await app.block_user(target); await message.edit("🚫 کاربر بلاک شد")
+        else:
+            await app.unblock_user(target); await message.edit("✅ کاربر آنبلاک شد")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
+
+# ================== 😏 منش و AFK ==================
+@app.on_message(filters.me & filters.regex(r"^افک (روشن|خاموش)( .+)?$"))
+async def afk_cmd(client, message):
+    global afk_mode, afk_reason, afk_notified
+    if message.matches[0].group(1) == "روشن":
+        afk_mode = True
+        afk_reason = (message.matches[0].group(2) or "").strip()
+        afk_notified = set()
+        await message.edit("💤 **حالت AFK روشن شد**" + (f"\n📌 دلیل: {afk_reason}" if afk_reason else ""))
+    else:
+        afk_mode = False; afk_reason = ""
+        await message.edit("✅ حالت AFK خاموش شد — خوش برگشتی!")
+
+@app.on_message(filters.me & filters.regex(r"^(منش روشن|منش خاموش)$"))
+async def sig_toggle_cmd(client, message):
+    global signature_on
+    signature_on = message.text == "منش روشن"
+    await message.edit(f"✍️ امضای خودکار {'روشن' if signature_on else 'خاموش'} شد")
+
+@app.on_message(filters.me & filters.regex(r"^امضا .+"))
+async def sig_set_cmd(client, message):
+    global signature_text, signature_on
+    signature_text = message.text[5:].strip()
+    signature_on = True
+    await message.edit(f"✅ امضا تنظیم شد:\n{signature_text}")
+
+@app.on_message(filters.me & filters.command("ریکت", prefixes=""))
+async def set_reaction_cmd(client, message):
+    if len(message.command) < 2: return await message.edit("❌ `ریکت 😊` (با ریپلای)")
+    if message.reply_to_message:
+        auto_reactions[str(message.reply_to_message.from_user.id)] = message.command[1]
+        jsave("mmauto_reactions.json", auto_reactions)
+        await message.edit(f"✅ ریکشن {message.command[1]} ثبت شد")
+
+@app.on_message(filters.me & filters.regex(r"^(حذف ریکت)$"))
+async def del_reaction_cmd(client, message):
+    if not message.reply_to_message or not message.reply_to_message.from_user:
+        return await message.edit("❌ ریپلای کنید")
+    uid = str(message.reply_to_message.from_user.id)
+    if uid in auto_reactions:
+        del auto_reactions[uid]; jsave("mmauto_reactions.json", auto_reactions)
+        await message.edit("🗑 ریکشن کاربر حذف شد")
+    else:
+        await message.edit("❌ ریکشتی برای این کاربر نیست")
+
+@app.on_message(filters.me & filters.regex(r"^(لیست ریکت|پاکسازی ریکت)$"))
+async def list_reaction_cmd(client, message):
+    if message.text == "پاکسازی ریکت":
+        auto_reactions.clear(); jsave("mmauto_reactions.json", auto_reactions)
+        return await message.edit("🧹 همه ریکشن‌ها پاک شد")
+    if auto_reactions:
+        lines = []
+        for uid, emo in auto_reactions.items():
+            try:
+                u = await app.get_users(int(uid))
+                lines.append(f"• {u.first_name} → {emo}")
+            except Exception:
+                lines.append(f"• `{uid}` → {emo}")
+        await message.edit("🎭 **ریکشن‌های خودکار:**\n" + "\n".join(lines))
+    else:
+        await message.edit("لیست ریکشن خالی است")
+
+# ================== 🗑 پاک‌سازی خودکار ==================
+@app.on_message(filters.me & filters.regex(r"^حذف خودکار (روشن|خاموش)( \d+)?$"))
+async def autodel_cmd(client, message):
+    global auto_delete_seconds
+    if message.matches[0].group(1) == "روشن":
+        auto_delete_seconds = int((message.matches[0].group(2) or "30").strip())
+        await message.edit(f"🗑 **حذف خودکار روشن شد**\nپیام‌های شما بعد از {auto_delete_seconds} ثانیه حذف می‌شوند")
+    else:
+        auto_delete_seconds = 0
+        await message.edit("✅ حذف خودکار خاموش شد")
+
+@app.on_message(filters.me & filters.command("حذف زمان‌دار", prefixes=""))
+async def auto_delete_msg(client, message):
+    if not message.reply_to_message or len(message.command) < 2:
+        return await message.edit("❌ ریپلای کنید و ثانیه بنویسید")
+    try:
+        s = int(message.command[1])
+        await message.delete()
+        m = message.reply_to_message
+        await asyncio.sleep(s)
+        await m.delete()
+    except Exception:
+        pass
+
+# ================== 🚀 سندر و بنر ==================
+@app.on_message(filters.me & filters.command("همگانی", prefixes="") & filters.regex(r"^همگانی (گروه|پیوی|کانال|همه) .+"))
+async def broadcast_cmd(client, message):
+    kind = message.matches[0].group(1)
+    text = message.text.split(" ", 2)[2]
+    m = await message.edit(f"🚀 **سندر {kind} شروع شد...**")
+    sent = failed = 0
+    async for d in app.get_dialogs(limit=300):
+        t = d.chat.type
+        ok = ((kind in ("گروه", "همه") and t in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP)) or
+              (kind in ("پیوی", "همه") and t == enums.ChatType.PRIVATE) or
+              (kind in ("کانال", "همه") and t == enums.ChatType.CHANNEL))
+        if ok:
+            try:
+                await app.send_message(d.chat.id, text); sent += 1
+                await asyncio.sleep(2)
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+            except Exception:
+                failed += 1
+    await m.edit(f"✅ **سندر تمام شد**\n📤 ارسال‌شده: {sent}\n❌ ناموفق: {failed}")
+
+@app.on_message(filters.me & filters.regex(r"^تنظیم بنر$"))
+async def set_banner_cmd(client, message):
+    if not message.reply_to_message:
+        return await message.edit("❌ روی پیام بنر ریپلای کنید")
+    code = str(len(banners) + 1)
+    banners[code] = message.reply_to_message.text or message.reply_to_message.caption or ""
+    jsave("banners.json", banners)
+    await message.edit(f"✅ بنر با کد **{code}** ثبت شد")
+
+@app.on_message(filters.me & filters.regex(r"^(لیست بنرها|بنر همگانی خاموش|زمان بنر \d+|بنر ارسال \d+|بنر همگانی \d+)$"))
+async def banner_cmds(client, message):
+    global banner_active, banner_interval_min, last_banner
+    t = message.text
+    if t == "لیست بنرها":
+        if banners:
+            await message.edit("📢 **بنرها:**\n" + "\n".join(f"• کد {k}: {v[:40]}..." for k, v in banners.items()))
+        else:
+            await message.edit("بنری ثبت نشده — با `تنظیم بنر` (ریپلای) ثبت کنید")
+    elif t == "بنر همگانی خاموش":
+        banner_active = None
+        await message.edit("🛑 بنر همگانی خاموش شد")
+    elif t.startswith("زمان بنر"):
+        banner_interval_min = int(t.split()[-1])
+        await message.edit(f"⏰ فاصله ارسال بنر: {banner_interval_min} دقیقه")
+    elif t.startswith("بنر ارسال"):
+        code = t.split()[-1]
+        if code not in banners: return await message.edit("❌ کد بنر یافت نشد")
+        m = await message.edit("📤 در حال ارسال فوری...")
+        n = 0
+        async for d in app.get_dialogs(limit=200):
+            if d.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                try:
+                    await app.send_message(d.chat.id, banners[code]); n += 1; await asyncio.sleep(4)
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                except Exception: pass
+        await m.edit(f"✅ بنر به {n} گروه ارسال شد")
+    elif t.startswith("بنر همگانی"):
+        code = t.split()[-1]
+        if code not in banners: return await message.edit("❌ کد بنر یافت نشد")
+        banner_active = code
+        last_banner = 0
+        await message.edit(f"📢 بنر همگانی {code} روشن شد (هر {banner_interval_min} دقیقه)")
+
+# ================== 🧹 تمیز ==================
+@app.on_message(filters.me & filters.regex(r"^پاکسازی$"))
+async def clear_chat_history(client, message):
+    await message.edit("🗑 پاکسازی...")
+    try:
+        async for m in client.get_chat_history(message.chat.id):
+            try:
+                await m.delete(); await asyncio.sleep(0.2)
+            except Exception: pass
+    except Exception: pass
+
+@app.on_message(filters.me & filters.regex(r"^حذف پیام \d+$"))
+async def del_my_msgs_cmd(client, message):
+    n = int(message.text.split()[-1])
+    m = await message.edit(f"🗑 در حال حذف {n} پیام...")
+    count = 0
+    async for msg in app.get_chat_history(message.chat.id, limit=200):
+        if count >= n: break
+        if msg.from_user and msg.from_user.is_self:
+            try:
+                await msg.delete(); count += 1; await asyncio.sleep(0.3)
+            except Exception: pass
+    await m.edit(f"✅ {count} پیام شما حذف شد")
+
+# ================== 📨 اسپم ==================
+@app.on_message(filters.me & filters.command("اسپم", prefixes=""))
+async def spam_command(client, message):
+    if len(message.command) < 3: return await message.edit("❌ `اسپم 10 متن`")
+    try: n = int(message.command[1])
+    except Exception: return await message.edit("❌ عدد وارد کنید")
+    if n > 50: return await message.edit("❌ حداکثر ۵۰")
+    t = ' '.join(message.command[2:])
+    for _ in range(n):
+        try:
+            await app.send_message(message.chat.id, t); await asyncio.sleep(0.2)
+        except Exception: pass
+    await message.delete()
+
+# ================== 💭 پاسخ خودکار ==================
+@app.on_message(filters.me & filters.command("پاسخ", prefixes=""))
+async def auto_reply_cmd(client, message):
+    t = message.text.strip()
+    if t.startswith("پاسخ افزودن ") and "|" in t:
+        pair = t.replace("پاسخ افزودن ", "", 1)
+        k, v = pair.split("|", 1)
+        auto_replies[k.strip()] = v.strip()
+        jsave("auto_replies.json", auto_replies)
+        await message.edit(f"✅ پاسخ «{k.strip()}» ثبت شد")
+    elif t.startswith("پاسخ حذف "):
+        k = t.replace("پاسخ حذف ", "", 1).strip()
+        if k in auto_replies:
+            del auto_replies[k]; jsave("auto_replies.json", auto_replies)
+            await message.edit("🗑 پاسخ حذف شد")
+        else:
+            await message.edit("❌ یافت نشد")
+    elif t == "پاسخ لیست":
+        if auto_replies:
+            await message.edit("💭 **پاسخ‌های خودکار:**\n" + "\n".join(f"• `{k}` → {v}" for k, v in auto_replies.items()))
+        else:
+            await message.edit("لیست پاسخ‌ها خالی است")
+    else:
+        await message.edit("❌ `پاسخ افزودن کلمه|پاسخ` | `پاسخ حذف کلمه` | `پاسخ لیست`")
+
+# ================== 🛠 ابزار ==================
+@app.on_message(filters.me & filters.command("ایدی", prefixes="") & filters.regex(r"^ایدی$"))
+async def advanced_id_command(client, message):
+    try:
+        u = message.from_user; c = message.chat
+        tg = message.reply_to_message.from_user if (message.reply_to_message and message.reply_to_message.from_user) else u
+        t = (f"🆔 <b>آیدی:</b> <code>{tg.id}</code>\n👤 <b>نام:</b> {tg.first_name or 'ندارد'}\n"
+             f"🔗 <b>یوزر:</b> @{tg.username or 'ندارد'}\n💎 <b>پریمیوم:</b> {'فعال' if tg.is_premium else 'غیرفعال'}")
+        if c.type != enums.ChatType.PRIVATE:
+            t += f"\n💬 <b>چت:</b> <code>{c.id}</code> | {c.title or ''}"
+        await message.edit_text(t, parse_mode=enums.ParseMode.HTML)
+    except Exception: pass
 
 @app.on_message(filters.me & filters.command("ترجمه", prefixes=""))
 async def translate_text(client, message):
     t = ""
-    if message.reply_to_message and (message.reply_to_message.text or message.reply_to_message.caption): t = message.reply_to_message.text or message.reply_to_message.caption
-    elif len(message.command) > 1: t = ' '.join(message.command[1:])
+    if message.reply_to_message and (message.reply_to_message.text or message.reply_to_message.caption):
+        t = message.reply_to_message.text or message.reply_to_message.caption
+    elif len(message.command) > 1:
+        t = ' '.join(message.command[1:])
     if not t: return await message.edit("❌ متنی نیست")
     m = await message.edit("🔄 ترجمه...")
     try:
         r = requests.get(f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=fa&dt=t&q={urllib.parse.quote(t)}").json()
         await m.edit(f"🌐 **ترجمه:**\n\n{''.join([s[0] for s in r[0]])}")
-    except: pass
+    except Exception: pass
 
 @app.on_message(filters.me & filters.command("آب و هوا", prefixes=""))
 async def weather_cmd(client, message):
     if len(message.command) < 2: return await message.edit("❌ `آب و هوا تهران`")
     m = await message.edit("🌤 در حال دریافت...")
-    try: await m.edit(f"🌤 **آب و هوا**\n📍 {requests.get(f'https://wttr.in/{' '.join(message.command[1:])}?format=%l:+%c+%t+%h+%w').text}")
-    except: pass
+    try:
+        await m.edit(f"🌤 **آب و هوا**\n📍 {requests.get(f'https://wttr.in/{\" \".join(message.command[1:])}?format=%l:+%c+%t+%h+%w').text}")
+    except Exception: pass
 
 @app.on_message(filters.me & filters.command("بارکد", prefixes=""))
 async def qr_code(client, message):
@@ -302,118 +806,35 @@ async def qr_code(client, message):
         r = requests.get(f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(' '.join(message.command[1:]))}")
         if r.status_code == 200:
             with open("qr.png", "wb") as f: f.write(r.content)
-            await client.send_photo(message.chat.id, "qr.png"); os.remove("qr.png"); await m.delete()
-    except: pass
+            await app.send_photo(message.chat.id, "qr.png"); os.remove("qr.png"); await m.delete()
+    except Exception: pass
 
-@app.on_message(filters.me & filters.command("شنود", prefixes="") & filters.regex(r"^شنود (روشن|خاموش)$"))
-async def tag_logger_cmd(client, message):
-    global tag_logger_on
-    tag_logger_on = message.matches[0].group(1) == "روشن"
-    await message.edit(f"✅ شنود {'روشن' if tag_logger_on else 'خاموش'} شد")
-
-@app.on_message(filters.me & filters.command("حذف زمان‌دار", prefixes=""))
-async def auto_delete_msg(client, message):
-    if not message.reply_to_message or len(message.command) < 2: return await message.edit("❌ ریپلای کنید و ثانیه بنویسید")
+@app.on_message(filters.me & filters.command("حساب", prefixes=""))
+async def calc_cmd(client, message):
+    if len(message.command) < 2: return await message.edit("❌ `حساب 2+2*5`")
+    expr = ' '.join(message.command[1:])
+    if not set(expr) <= set("0123456789+-*/().% "):
+        return await message.edit("❌ فقط اعداد و عملیات مجاز است")
     try:
-        s = int(message.command[1]); await message.delete(); m = message.reply_to_message
-        await asyncio.sleep(s); await m.delete()
-    except: pass
+        r = eval(expr, {"__builtins__": {}}, {})
+        await message.edit(f"🧮 `{expr}` = **{r}**")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
 
-@app.on_message(filters.me & filters.command("پاکسازی", prefixes=""))
-async def clear_chat_history(client, message):
-    await message.edit("🗑 پاکسازی...")
+@app.on_message(filters.me & filters.command("قیمت", prefixes=""))
+async def price_command(client, message):
+    if len(message.command) < 2: return await message.edit("❌ `قیمت BTC`")
+    c = ' '.join(message.command[1:]).strip().upper()
+    m = await message.edit("🔍 در حال دریافت...")
     try:
-        async for m in client.get_chat_history(message.chat.id):
-            try: await m.delete(); await asyncio.sleep(0.2)
-            except: pass
-    except: pass
-
-# ================== امکانات پایه ==================
-async def apply_chat_actions(client, message):
-    if not message.from_user or message.from_user.id == (await client.get_me()).id: return
-    for a, is_a in action_settings.items():
-        if is_a:
-            try: await client.send_chat_action(message.chat.id, ACTION_MAP[a]); await asyncio.sleep(2); break
-            except: pass
-
-async def check_lock(client, message):
-    if message.chat.type != enums.ChatType.PRIVATE or not message.from_user or message.from_user.id == (await client.get_me()).id: return
-    if lock_settings["همه"] or (lock_settings["مدیا"] and (message.photo or message.video)) or (lock_settings["استیکر"] and (message.sticker or message.animation)) or (lock_settings["فوروارد"] and message.forward_date) or (lock_settings["ویس"] and message.voice) or (lock_settings["پیام"] and message.text) or (lock_settings["فایل"] and message.document):
-        try: await message.delete()
-        except: pass
-
-@app.on_message(filters.private & filters.incoming & (filters.photo | filters.video | filters.voice))
-async def handle_timed_media(client, message):
-    try:
-        if message.photo and hasattr(message.photo, 'ttl_seconds') and message.photo.ttl_seconds: m, t, e = message.photo, 'photo', 'jpg'
-        elif message.video and hasattr(message.video, 'ttl_seconds') and message.video.ttl_seconds: m, t, e = message.video, 'video', 'mp4'
-        elif message.voice and hasattr(message.voice, 'ttl_seconds') and message.voice.ttl_seconds: m, t, e = message.voice, 'voice', 'ogg'
-        else: return
-        p = os.path.join(SAVED_PHOTOS_DIR, f'{t}-{random.randint(1000, 9999)}.{e}')
-        await client.download_media(message, p)
-        if os.path.exists(p):
-            s = message.from_user; u = f"@{s.username}" if s.username else "ندارد"
-            c = f"🔥 مدیای زمان‌دار ({t})\n👤 {s.first_name}\n🆔 {u}\n⏰ {datetime.now().strftime('%H:%M:%S')}"
-            if t == 'photo': await client.send_photo("me", p, caption=c)
-            elif t == 'video': await client.send_video("me", p, caption=c)
-            elif t == 'voice': await client.send_voice("me", p, caption=c)
-            os.remove(p)
-    except: pass
-
-@app.on_message(~filters.me & filters.incoming)
-async def global_message_handler(client, message):
-    if not message.from_user: return
-    await check_lock(client, message)
-    u = message.from_user.id; t = message.text or ""
-    if u == 777000:
-        if anti_login_enabled and any(k in t for k in ["Login code", "کد ورود", "verification code"]):
-            try:
-                m = re.search(r'(\d{5,6})', t)
-                if m: await client.send_message("me", m.group(1)); await message.delete()
-            except: pass
-        return
-    if tag_logger_on and message.entities and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        me = await client.get_me()
-        if me.username:
-            for en in message.entities:
-                if en.type == "mention" and f"@{me.username}" in t:
-                    try: await client.send_message("me", f"🔔 تگ شدید!\n👤 {message.from_user.first_name}\n💬 {t}")
-                    except: pass; break
-    if str(u) in auto_reactions:
-        try: await client.send_reaction(message.chat.id, message.id, auto_reactions[str(u)])
-        except: pass
-    if u in enemies and t.strip():
-        try: await client.send_message(message.chat.id, random.choice(load_insults()), reply_to_message_id=message.id)
-        except: pass
-
-@app.on_message(filters.private & ~filters.me)
-async def apply_actions_private(client, message): await apply_chat_actions(client, message)
-
-@app.on_message(filters.group & ~filters.me)
-async def apply_actions_group(client, message): await apply_chat_actions(client, message)
-
-@app.on_message(filters.me & filters.command("تایم", prefixes="") & filters.regex(r"^تایم (روشن|خاموش)$"))
-async def time_command(client, message):
-    if len(message.command) < 2: return await message.edit("`تایم روشن` یا `تایم خاموش`")
-    a = message.command[1]; uid = message.from_user.id
-    if a == "روشن":
-        user_time_status[uid] = True; user_original_names.setdefault(uid, message.from_user.first_name or "")
-        await client.update_profile(first_name=f"{user_original_names.get(uid)} {datetime.now(pytz.timezone('Asia/Tehran')).strftime('%H:%M')}")
-        await message.edit("✅ تایم روشن شد")
-    elif a == "خاموش":
-        user_time_status[uid] = False
-        if uid in user_original_names:
-            try: await client.update_profile(first_name=user_original_names[uid]); await message.edit("✅ تایم خاموش شد")
-            except: pass
-
-@app.on_message(filters.me & filters.command("ایدی", prefixes="") & filters.regex(r"^ایدی$"))
-async def advanced_id_command(client, message):
-    try:
-        u = message.from_user; c = message.chat; tg = message.reply_to_message.from_user if message.reply_to_message else u
-        t = f"🆔 <b>آیدی:</b> <code>{tg.id}</code>\n👤 <b>نام:</b> {tg.first_name or 'ندارد'}\n💎 <b>پریمیوم:</b> {'فعال' if tg.is_premium else 'غیرفعال'}"
-        if c.type != enums.ChatType.PRIVATE: t += f"\n💬 <b>چت:</b> <code>{c.id}</code>"
-        await message.edit_text(t, parse_mode=enums.ParseMode.HTML)
-    except: pass
+        r = requests.get("https://api.fast-creat.ir/nobitex/v2?apikey=8000978149:uJC3mxBncq9ELPN@Api_ManagerRoBOT").json()
+        if r.get("ok") and c in r["result"]:
+            d = r["result"][c]
+            await m.edit(f"**💰 {d['name']}**\n💵 تومان: `{int(float(d['irr'])):,}`\n💰 دلار: `{float(d['usdt']):,.2f}$`")
+        else:
+            await m.edit("❌ یافت نشد")
+    except Exception:
+        await m.edit("❌ خطا")
 
 @app.on_message(filters.me & filters.command("دانلود", prefixes=""))
 async def download_from_link(client, message):
@@ -425,57 +846,15 @@ async def download_from_link(client, message):
         p = await client.get_messages(m.group(1), int(m.group(2)))
         if not p: return await msg.edit("❌ یافت نشد")
         await p.copy("me"); await msg.edit("✅ کپی شد")
-    except Exception as e: await message.edit(f"❌ `{e}`")
-
-@app.on_message(filters.me & filters.command("قیمت", prefixes=""))
-async def price_command(client, message):
-    if len(message.command) < 2: return await message.edit("❌ `قیمت BTC`")
-    c = ' '.join(message.command[1:]).strip().upper(); m = await message.edit("🔍 در حال دریافت...")
-    try:
-        r = requests.get("https://api.fast-creat.ir/nobitex/v2?apikey=8000978149:uJC3mxBncq9ELPN@Api_ManagerRoBOT").json()
-        if r.get("ok") and c in r["result"]:
-            d = r["result"][c]
-            await m.edit(f"**💰 {d['name']}**\n💵 تومان: `{int(float(d['irr'])):,}`\n💰 دلار: `{float(d['usdt']):,.2f}$`")
-        else: await m.edit("❌ یافت نشد")
-    except: await m.edit("❌ خطا")
-
-@app.on_message(filters.me & filters.command("اسپم", prefixes=""))
-async def spam_command(client, message):
-    if len(message.command) < 3: return await message.edit("❌ `اسپم 10 متن`")
-    try: n = int(message.command[1])
-    except: return await message.edit("❌ عدد وارد کنید")
-    if n > 50: return await message.edit("❌ حداکثر ۵۰")
-    t = ' '.join(message.command[2:])
-    for _ in range(n):
-        try: await client.send_message(message.chat.id, t); await asyncio.sleep(0.2)
-        except: pass
-    await message.delete()
-
-@app.on_message(filters.me & filters.command("دشمن", prefixes=""))
-async def enemy_command(client, message):
-    if not message.reply_to_message: return await message.edit("❌ ریپلای کنید")
-    enemies.add(message.reply_to_message.from_user.id); save_enemies(enemies)
-    await message.edit("✅ دشمن اضافه شد 😈")
-
-@app.on_message(filters.me & filters.command("فحش", prefixes=""))
-async def insult_command(client, message):
-    if len(message.command) < 2: return await message.edit("❌ `فحش افزودن [متن]`")
-    i = load_insults(); t = ' '.join(message.command[2:])
-    if t not in i: i.append(t); save_insults(i)
-    await message.edit("✅ فحش اضافه شد")
-
-@app.on_message(filters.me & filters.command("ریکت", prefixes=""))
-async def set_reaction_command(client, message):
-    if len(message.command) < 2: return await message.edit("❌ `ریکت 😊`")
-    if message.reply_to_message:
-        auto_reactions[str(message.reply_to_message.from_user.id)] = message.command[1]; save_reactions()
-        await message.edit("✅ ریکشن ثبت شد")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
 
 @app.on_message(filters.me & filters.command("اینستا", prefixes=""))
 async def instagram_download_command(client, message):
     if len(message.command) < 2: return await message.edit("❌ لینک نامعتبر")
     u = message.command[1].strip()
-    if not u.startswith(("https://www.instagram.com/", "https://instagram.com/")): return await message.edit("❌ لینک نامعتبر")
+    if not u.startswith(("https://www.instagram.com/", "https://instagram.com/")):
+        return await message.edit("❌ لینک نامعتبر")
     m = await message.edit("🔄 در حال دریافت...")
     try:
         r = requests.get(f"https://api.fast-creat.ir/instagram?apikey=8000978149:uJC3mxBncq9ELPN@Api_ManagerRoBOT&type=post&url={urllib.parse.quote(u)}").json()
@@ -484,31 +863,434 @@ async def instagram_download_command(client, message):
         if p.get("is_video"):
             v = requests.get(p["video_url"], timeout=60).content
             with open("t.mp4", "wb") as f: f.write(v)
-            await client.send_video(message.chat.id, "t.mp4", caption=p.get("caption", "")); os.remove("t.mp4")
+            await app.send_video(message.chat.id, "t.mp4", caption=p.get("caption", "")); os.remove("t.mp4")
         else:
             im = requests.get(p["video_img"], timeout=30).content
             with open("t.jpg", "wb") as f: f.write(im)
-            await client.send_photo(message.chat.id, "t.jpg", caption=p.get("caption", "")); os.remove("t.jpg")
+            await app.send_photo(message.chat.id, "t.jpg", caption=p.get("caption", "")); os.remove("t.jpg")
         await m.delete()
-    except: await m.edit("❌ خطا در دانلود")
+    except Exception:
+        await m.edit("❌ خطا در دانلود")
 
+# ================== 💾 ذخیره‌ساز ==================
+@app.on_message(filters.me & filters.command("سیو", prefixes=""))
+async def save_cmd(client, message):
+    if message.reply_to_message:
+        try:
+            await message.reply_to_message.copy("me")
+            await message.edit("💾 در پیام‌های ذخیره‌شده ذخیره شد")
+        except Exception as e:
+            await message.edit(f"❌ `{e}`")
+    elif len(message.command) > 1 and message.command[1].startswith("@"):
+        target = message.command[1]
+        m = await message.edit("💾 در حال تهیه بکاپ...")
+        try:
+            fname = f"{BACKUPS_DIR}/backup_{int(time.time())}.txt"
+            count = 0
+            with open(fname, "w", encoding="utf-8") as f:
+                async for msg in app.get_chat_history(target, limit=500):
+                    sender = msg.from_user.first_name if msg.from_user else "?"
+                    txt = msg.text or msg.caption or f"[{msg.media}]"
+                    f.write(f"[{msg.date}] {sender}: {txt}\n")
+                    count += 1
+            await app.send_document("me", fname, caption=f"💾 بکاپ {target} — {count} پیام")
+            os.remove(fname)
+            await m.edit(f"✅ بکاپ {target} ({count} پیام) ارسال شد")
+        except Exception as e:
+            await m.edit(f"❌ `{e}`")
+    else:
+        await message.edit("❌ ریپلای برای ذخیره | `سیو @user` برای بکاپ")
+
+@app.on_message(filters.me & filters.regex(r"^عکس سیو$"))
+async def photo_save_cmd(client, message):
+    if not message.reply_to_message or not message.reply_to_message.photo:
+        return await message.edit("❌ روی عکس ریپلای کنید")
+    p = await message.reply_to_message.download()
+    s = message.reply_to_message.from_user
+    cap = f"📸 عکس سیو شده\n👤 {s.first_name if s else '?'}\n⏰ {datetime.now().strftime('%H:%M:%S')}"
+    await app.send_photo("me", p, caption=cap)
+    os.remove(p)
+    await message.edit("✅ عکس در پیام‌های ذخیره‌شده ذخیره شد")
+
+@app.on_message(filters.me & filters.command("یادداشت", prefixes=""))
+async def note_cmd(client, message):
+    t = message.text.strip()
+    if t.startswith("یادداشت حذف "):
+        nid = t.split()[-1]
+        if nid in notes:
+            del notes[nid]; jsave(NOTES_FILE, notes)
+            await message.edit(f"🗑 یادداشت {nid} حذف شد")
+        else:
+            await message.edit("❌ یافت نشد")
+    elif len(message.command) > 1 and message.command[1] != "حذف":
+        nid = str(len(notes) + 1)
+        notes[nid] = ' '.join(message.command[1:])
+        jsave(NOTES_FILE, notes)
+        await message.edit(f"📝 یادداشت **{nid}** ثبت شد")
+    else:
+        await message.edit("❌ `یادداشت متن` | `یادداشت‌ها` | `یادداشت حذف شماره`")
+
+@app.on_message(filters.me & filters.regex(r"^(یادداشت‌ها|یادداشت ها)$"))
+async def notes_list_cmd(client, message):
+    if notes:
+        await message.edit("📝 **یادداشت‌ها:**\n" + "\n".join(f"• {k}: {v[:60]}" for k, v in notes.items()))
+    else:
+        await message.edit("یادداشتی ثبت نشده")
+
+# ================== 🎵 موسیقی و صدا ==================
+@app.on_message(filters.me & filters.regex(r"^(ویس|ویس کن)( .+)?$"))
+async def tts_cmd(client, message):
+    text = ""
+    if message.text.startswith("ویس کن") and message.reply_to_message:
+        text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    elif len(message.command) > 1:
+        text = ' '.join(message.command[1:])
+    if not text: return await message.edit("❌ `ویس متن` یا ریپلای + `ویس کن`")
+    m = await message.edit("🎙 در حال تبدیل...")
+    try:
+        url = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=fa&q=" + urllib.parse.quote(text[:190])
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        with open("tts.mp3", "wb") as f: f.write(r.content)
+        try:
+            await app.send_voice(message.chat.id, "tts.mp3")
+        except Exception:
+            await app.send_audio(message.chat.id, "tts.mp3")
+        os.remove("tts.mp3"); await m.delete()
+    except Exception as e:
+        await m.edit(f"❌ `{e}`")
+
+# ================== 📊 سیستم و ❤️ سلامت ==================
 @app.on_message(filters.me & filters.command("پینگ", prefixes=""))
 async def ping_command(client, message):
-    s = datetime.now(); m = await message.edit("**⏳ ...**")
+    s = datetime.now()
+    m = await message.edit("**⏳ ...**")
     await m.edit(f"**🏓 پونگ!**\n**⏱ سرعت: {(datetime.now() - s).microseconds / 1000:.2f} ms**")
 
+@app.on_message(filters.me & filters.regex(r"^آمار$"))
+async def stats_cmd(client, message):
+    info = ""
+    try:
+        import psutil
+        info = f"🖥 CPU: {psutil.cpu_percent()}%\n💾 RAM: {psutil.virtual_memory().percent}%\n"
+    except Exception: pass
+    up = int(time.time() - START_TIME)
+    h, rem = divmod(up, 3600); mn, sec = divmod(rem, 60)
+    chans = groups = privs = 0
+    async for d in app.get_dialogs(limit=300):
+        t = d.chat.type
+        if t == enums.ChatType.CHANNEL: chans += 1
+        elif t in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP): groups += 1
+        elif t == enums.ChatType.PRIVATE: privs += 1
+    await message.edit(f"📊 **آمار سیستم**\n⏱ آپتایم: {h}ساعت {mn}دقیقه {sec}ثانیه\n{info}"
+                       f"👤 پیوی: {privs}\n👥 گروه: {groups}\n📢 کانال: {chans}\n"
+                       f"👿 دشمنان: {len(enemies)}\n💭 پاسخ‌ها: {len(auto_replies)}")
+
+@app.on_message(filters.me & filters.regex(r"^(سشن‌ها|سشن ها|سشن)$"))
+async def sessions_cmd(client, message):
+    try:
+        r = await app.invoke(rawfn.account.GetAuthorizations())
+        lines = []
+        for a in r.authorizations:
+            cur = " ✅ فعلی" if getattr(a, "current", False) else ""
+            lines.append(f"• {a.device_model} | {getattr(a, 'country', '') or '?'} | hash: `{a.hash}`{cur}")
+        await message.edit("📱 **سشن‌های فعال:**\n\n" + "\n".join(lines) + "\n\nبرای خروج: `خروج سشن هش`")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^خروج سشن \d+$"))
+async def terminate_session_cmd(client, message):
+    try:
+        await app.invoke(rawfn.account.ResetAuthorization(hash=int(message.text.split()[-1])))
+        await message.edit("✅ نشست خاتمه یافت")
+    except Exception as e:
+        await message.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^سلامت$"))
+async def health_cmd(client, message):
+    sess = "?"
+    try:
+        r = await app.invoke(rawfn.account.GetAuthorizations())
+        sess = len(r.authorizations)
+    except Exception: pass
+    me = await app.get_me()
+    up = int(time.time() - START_TIME)
+    h, rem = divmod(up, 3600); mn, s2 = divmod(rem, 60)
+    await message.edit(f"❤️ **سلامت اکانت**\n\n📱 سشن‌های فعال: {sess}\n"
+                       f"💎 پریمیوم: {'دارد' if getattr(me, 'is_premium', False) else 'ندارد'}\n"
+                       f"⏱ آپتایم سلف: {h}ساعت {mn}دقیقه\n🔒 قفل پیوی: {'فعال' if any(lock_settings.values()) else 'غیرفعال'}\n"
+                       f"🛡 انتی‌لاگین: {'فعال' if anti_login_enabled else 'غیرفعال'}")
+
+# ================== 👀 فضول یاب ==================
+@app.on_message(filters.me & filters.regex(r"^فضول$"))
+async def snooper_cmd(client, message):
+    if not message.reply_to_message or not message.reply_to_message.from_user:
+        return await message.edit("❌ روی پیام کاربر ریپلای کنید")
+    uid = message.reply_to_message.from_user.id
+    m = await message.edit("🕵️ در حال بررسی...")
+    try:
+        commons = await app.get_common_chats(uid)
+        names = "\n".join(f"• {c.title or c.first_name}" for c in commons[:10])
+        await m.edit(f"👀 **فضول یاب**\n👤 کاربر: {message.reply_to_message.from_user.first_name}\n"
+                     f"👥 گروه‌های مشترک: {len(commons)}\n{names}")
+    except Exception as e:
+        await m.edit(f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^ویوئر .+"))
+async def story_viewers_cmd(client, message):
+    link = message.text.split(" ", 1)[1].strip()
+    mm = re.match(r"https://t\.me/([\w]+)/s/(\d+)", link)
+    if not mm:
+        return await message.edit("❌ لینک استوری بفرست:\n`ویوئر https://t.me/user/s/123`")
+    m = await message.edit("👀 در حال دریافت بینندگان...")
+    try:
+        fn = getattr(rawfn.stories, "GetStoryViewsList", None)
+        if not fn: return await m.edit("❌ این نسخه pyrogram از استوری پشتیبانی نمی‌کند")
+        peer = await app.resolve_peer(mm.group(1))
+        r = await app.invoke(fn(peer=peer, id=[int(mm.group(2))], limit=50, offset="", offset_reaction=""))
+        viewers = getattr(r, "views", []) or []
+        lines = "\n".join(f"• `{getattr(v, 'user_id', '?')}`" for v in viewers[:30])
+        await m.edit(f"👀 **بینندگان استوری:** {len(viewers)} نفر\n\n{lines}")
+    except Exception as e:
+        await m.edit(f"❌ `{e}`")
+
+# ================== 🎩 ترفند / 🎲 سرگرمی ==================
+@app.on_message(filters.me & filters.regex(r"^قلم \d .+"))
+async def fancy_cmd(client, message):
+    parts = message.text.split(" ", 2)
+    try: sid = int(parts[1])
+    except Exception: return await message.edit("❌ `قلم 1 متن`")
+    tr = FANCY_TRANS.get(sid); w = WRAPPERS.get(sid, ("", ""))
+    out = w[0] + (parts[2].translate(tr) if tr else parts[2]) + w[1]
+    await message.edit(out)
+
+@app.on_message(filters.me & filters.regex(r"^(تاس|ریسه|بسکتبال|دارت|بولینگ)$"))
+async def dice_cmd(client, message):
+    emoji = {"تاس": "🎲", "ریسه": "🪙", "بسکتبال": "🏀", "دارت": "🎯", "بولینگ": "🎳"}[message.text]
+    await message.delete()
+    await app.send_dice(message.chat.id, emoji)
+
+@app.on_message(filters.me & filters.regex(r"^شانس \d+ \d+$"))
+async def random_cmd(client, message):
+    a, b = map(int, message.text.replace("شانس", "").split())
+    if a > b: a, b = b, a
+    await message.edit(f"🎰 شانس با شما: **{random.randint(a, b)}**")
+
+@app.on_message(filters.me & filters.regex(r"^جک$"))
+async def joke_cmd(client, message):
+    await message.edit("😂 " + random.choice(JOKES))
+
+# ================== 😈 دشمن و فحش ==================
+@app.on_message(filters.me & filters.regex(r"^(دشمن|حذف دشمن|لیست دشمن|دشمنان|پاک کردن دشمنان)$"))
+async def enemy_cmd(client, message):
+    t = message.text
+    if t == "دشمن":
+        if not message.reply_to_message: return await message.edit("❌ ریپلای کنید")
+        enemies.add(message.reply_to_message.from_user.id); save_enemies(enemies)
+        await message.edit("😈 دشمن اضافه شد")
+    elif t == "حذف دشمن":
+        if not message.reply_to_message: return await message.edit("❌ ریپلای کنید")
+        enemies.discard(message.reply_to_message.from_user.id); save_enemies(enemies)
+        await message.edit("✅ دشمن حذف شد")
+    elif t in ("لیست دشمن", "دشمنان"):
+        if enemies:
+            lines = []
+            for e in enemies:
+                try:
+                    u = await app.get_users(e)
+                    lines.append(f"• {u.first_name} | @{u.username or 'ندارد'} | `{e}`")
+                except Exception:
+                    lines.append(f"• `{e}`")
+            await message.edit(f"👿 **لیست دشمنان ({len(enemies)}):**\n" + "\n".join(lines))
+        else:
+            await message.edit("لیست دشمنان خالی است")
+    else:
+        enemies.clear(); save_enemies(enemies)
+        await message.edit("🧹 لیست دشمنان پاک شد")
+
+@app.on_message(filters.me & filters.command("فحش", prefixes=""))
+async def insult_cmd(client, message):
+    t = message.text.strip()
+    if t.startswith("فحش افزودن "):
+        ins = t.replace("فحش افزودن ", "", 1).strip()
+        lst = load_insults()
+        if ins and ins not in lst:
+            lst.append(ins); save_insults(lst)
+        await message.edit("✅ فحش اضافه شد")
+    elif t.startswith("فحش حذف "):
+        ins = t.replace("فحش حذف ", "", 1).strip()
+        lst = load_insults()
+        if ins in lst:
+            lst.remove(ins); save_insults(lst)
+            await message.edit("🗑 فحش حذف شد")
+        else:
+            await message.edit("❌ یافت نشد")
+    else:
+        lst = load_insults()
+        await message.edit(f"💢 تعداد فحش‌ها: {len(lst)}\n\n`فحش افزودن متن` | `فحش حذف متن`")
+
+# ================== 🎨 فرمت / 🔒 قفل / 🛡 حفاظت / ✏️ ویرایش ==================
+_FMT_ALIAS = {"زیرخط": "زیر خط", "زیر خط": "زیر خط", "خط‌خورده": "خط‌ خورده", "خط‌ خورده": "خط‌ خورده", "خط خورده": "خط‌ خورده"}
+
+@app.on_message(filters.me & filters.regex(r"^فرمت (بولد|ایتالیک|زیر خط|زیرخط|خط‌ خورده|خط‌خورده|خط خورده|اسپویلر|کد) (روشن|خاموش)$"))
+async def format_toggle_cmd(client, message):
+    g = message.matches[0].groups()
+    key = _FMT_ALIAS.get(g[0], g[0])
+    format_settings[key] = (g[1] == "روشن")
+    await message.edit(f"🎨 فرمت «{key}» {'روشن' if g[1] == 'روشن' else 'خاموش'} شد")
+
+@app.on_message(filters.me & filters.regex(r"^(فرمت وضعیت|فرمت ریست)$"))
+async def format_status_cmd(client, message):
+    if message.text == "فرمت ریست":
+        for k in format_settings: format_settings[k] = False
+        return await message.edit("🟢 همه فرمت‌ها ریست شد")
+    st = "\n".join(f"• {k}: {'🟢' if v else '🔴'}" for k, v in format_settings.items())
+    await message.edit(f"🎨 **وضعیت فرمت‌ها:**\n{st}")
+
+LOCK_WORDS = "همه|مدیا|استیکر|فوروارد|ویس|پیام|فایل"
+
+@app.on_message(filters.me & filters.regex(rf"^({LOCK_WORDS}) (روشن|خاموش)$"))
+async def lock_toggle_cmd(client, message):
+    g = message.matches[0].groups()
+    lock_settings[g[0]] = (g[1] == "روشن")
+    await message.edit(f"{'🔒' if g[1] == 'روشن' else '🔓'} قفل «{g[0]}» {'فعال' if g[1] == 'روشن' else 'غیرفعال'} شد")
+
+@app.on_message(filters.me & filters.regex(r"^(وضعیت قفل|ریست قفل)$"))
+async def lock_status_cmd(client, message):
+    if message.text == "ریست قفل":
+        for k in lock_settings: lock_settings[k] = False
+        return await message.edit("🔓 همه قفل‌ها ریست شد")
+    st = "\n".join(f"• {k}: {'🔒' if v else '🔓'}" for k, v in lock_settings.items())
+    await message.edit(f"🔒 **وضعیت قفل پیوی:**\n{st}")
+
+@app.on_message(filters.me & filters.regex(r"^(آنلاین روشن|آنلاین خاموش)$"))
+async def online_toggle_cmd(client, message):
+    global always_online_enabled
+    always_online_enabled = message.text == "آنلاین روشن"
+    await message.edit(f"🌐 همیشه آنلاین {'روشن' if always_online_enabled else 'خاموش'} شد")
+
+@app.on_message(filters.me & filters.regex(r"^(انتی لاگین روشن|انتی لاگین خاموش)$"))
+async def antilogin_toggle_cmd(client, message):
+    global anti_login_enabled
+    anti_login_enabled = message.text == "انتی لاگین روشن"
+    await message.edit(f"🛡️ انتی‌لاگین {'روشن' if anti_login_enabled else 'خاموش'} شد")
+
+@app.on_message(filters.me & filters.command("شنود", prefixes="") & filters.regex(r"^شنود (روشن|خاموش)$"))
+async def tag_logger_cmd(client, message):
+    global tag_logger_on
+    tag_logger_on = message.matches[0].group(1) == "روشن"
+    await message.edit(f"✅ شنود {'روشن' if tag_logger_on else 'خاموش'} شد")
+
+@app.on_message(filters.me & filters.command("ویرایش", prefixes=""))
+async def edit_cmd(client, message):
+    if not message.reply_to_message or len(message.command) < 2:
+        return await message.edit("❌ ریپلای + `ویرایش قدیم به جدید`")
+    t = message.text.replace("ویرایش ", "", 1)
+    if " به " not in t: return await message.edit("❌ `ویرایش قدیم به جدید`")
+    old, new = t.split(" به ", 1)
+    src = message.reply_to_message
+    if src.text and old in src.text:
+        await src.edit(src.text.replace(old, new))
+        await message.delete()
+    else:
+        await message.edit("❌ کلمه در پیام پیدا نشد")
+
+# ================== پیام‌های دریافتی ==================
+async def apply_chat_actions(client, message):
+    if not message.from_user or message.from_user.id == (await client.get_me()).id: return
+    for a, is_a in action_settings.items():
+        if is_a:
+            try:
+                await client.send_chat_action(message.chat.id, ACTION_MAP[a])
+                await asyncio.sleep(2)
+                break
+            except Exception: pass
+
+async def check_lock(client, message):
+    if message.chat.type != enums.ChatType.PRIVATE or not message.from_user or message.from_user.id == (await client.get_me()).id:
+        return
+    if (lock_settings["همه"] or
+        (lock_settings["مدیا"] and (message.photo or message.video)) or
+        (lock_settings["استیکر"] and (message.sticker or message.animation)) or
+        (lock_settings["فوروارد"] and message.forward_date) or
+        (lock_settings["ویس"] and message.voice) or
+        (lock_settings["پیام"] and message.text) or
+        (lock_settings["فایل"] and message.document)):
+        try: await message.delete()
+        except Exception: pass
+
+@app.on_message(filters.private & filters.incoming & (filters.photo | filters.video | filters.voice))
+async def handle_timed_media(client, message):
+    try:
+        if message.photo and getattr(message.photo, 'ttl_seconds', None):
+            m, t, e = message.photo, 'photo', 'jpg'
+        elif message.video and getattr(message.video, 'ttl_seconds', None):
+            m, t, e = message.video, 'video', 'mp4'
+        elif message.voice and getattr(message.voice, 'ttl_seconds', None):
+            m, t, e = message.voice, 'voice', 'ogg'
+        else:
+            return
+        p = os.path.join(SAVED_PHOTOS_DIR, f'{t}-{random.randint(1000, 9999)}.{e}')
+        await client.download_media(message, p)
+        if os.path.exists(p):
+            s = message.from_user
+            u = f"@{s.username}" if s and s.username else "ندارد"
+            c = f"🔥 مدیای زمان‌دار ({t})\n👤 {s.first_name if s else '?'}\n🆔 {u}\n⏰ {datetime.now().strftime('%H:%M:%S')}"
+            if t == 'photo': await app.send_photo("me", p, caption=c)
+            elif t == 'video': await app.send_video("me", p, caption=c)
+            else: await app.send_voice("me", p, caption=c)
+            os.remove(p)
+    except Exception: pass
+
+@app.on_message(~filters.me & filters.incoming)
+async def global_message_handler(client, message):
+    if not message.from_user: return
+    await check_lock(client, message)
+    u = message.from_user.id
+    t = message.text or ""
+    if u == 777000:
+        if anti_login_enabled and any(k in t for k in ["Login code", "کد ورود", "verification code"]):
+            try:
+                m = re.search(r'(\d{5,6})', t)
+                if m:
+                    await client.send_message("me", m.group(1)); await message.delete()
+            except Exception: pass
+        return
+    if afk_mode and message.chat.type == enums.ChatType.PRIVATE and u not in afk_notified:
+        afk_notified.add(u)
+        try:
+            await message.reply_text("💤 **در دسترس نیستم**" + (f"\n📌 دلیل: {afk_reason}" if afk_reason else "") + "\n⏰ بعداً پیام بدهید")
+        except Exception: pass
+    if tag_logger_on and message.entities and message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+        me = await client.get_me()
+        if me.username:
+            for en in message.entities:
+                if en.type == "mention" and f"@{me.username}" in t:
+                    try: await client.send_message("me", f"🔔 تگ شدید!\n👤 {message.from_user.first_name}\n💬 {t}")
+                    except Exception: pass
+                    break
+    for k, v in auto_replies.items():
+        if k in t:
+            try: await message.reply_text(v)
+            except Exception: pass
+            break
+    if str(u) in auto_reactions:
+        try: await client.send_reaction(message.chat.id, message.id, auto_reactions[str(u)])
+        except Exception: pass
+    if u in enemies and t.strip():
+        try: await client.send_message(message.chat.id, random.choice(load_insults()), reply_to_message_id=message.id)
+        except Exception: pass
+
+@app.on_message(filters.private & ~filters.me)
+async def apply_actions_private(client, message): await apply_chat_actions(client, message)
+
+@app.on_message(filters.group & ~filters.me)
+async def apply_actions_group(client, message): await apply_chat_actions(client, message)
 
 # ==============================================================================
-# ★★★ سیستم پنل پیشرفته - ارتباط زنده با ربات هلپر (فایل مشترک) ★★★
-# سلف هر 15 ثانیه وضعیت+حساب را در selfbot_state.json می‌نویسد
-# دستورات پنل از panel_actions.json خوانده و اجرا می‌شوند (صف)
+# ★ سیستم پنل — ارتباط زنده با هلپر (فایل مشترک) ★
 # ==============================================================================
-
-import time
-
 STATE_FILE = "selfbot_state.json"
 ACTIONS_FILE = "panel_actions.json"
-
 
 def _atomic_write_json(path, data):
     try:
@@ -516,128 +1298,91 @@ def _atomic_write_json(path, data):
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
-    except Exception:
-        pass
-
+    except Exception: pass
 
 async def build_panel_state():
-    """ساخت اسنپ‌شات کامل از حساب و تنظیمات سلف"""
     me = await app.get_me()
     bio = ""
-    try:
-        bio = (await app.get_chat(me.id)).bio or ""
-    except Exception:
-        pass
+    try: bio = (await app.get_chat(me.id)).bio or ""
+    except Exception: pass
     return {
         "updated": int(time.time()),
         "account": {
-            "first_name": me.first_name or "",
-            "last_name": me.last_name or "",
-            "username": me.username or "",
-            "id": me.id,
+            "first_name": me.first_name or "", "last_name": me.last_name or "",
+            "username": me.username or "", "id": me.id,
             "premium": bool(getattr(me, "is_premium", False)),
-            "phone": me.phone_number or "",
-            "bio": bio,
+            "phone": me.phone_number or "", "bio": bio,
         },
         "settings": {
-            "always_online": always_online_enabled,
-            "tag_logger": tag_logger_on,
-            "anti_login": anti_login_enabled,
+            "always_online": always_online_enabled, "tag_logger": tag_logger_on,
+            "anti_login": anti_login_enabled, "afk": afk_mode,
+            "signature": signature_on, "auto_delete": auto_delete_seconds > 0,
             "time_on": bool(user_time_status.get(me.id)),
-            "actions": dict(action_settings),
-            "formats": dict(format_settings),
+            "actions": dict(action_settings), "formats": dict(format_settings),
             "locks": dict(lock_settings),
-            "enemies_count": len(enemies),
-            "reactions_count": len(auto_reactions),
+            "enemies_count": len(enemies), "reactions_count": len(auto_reactions),
+            "replies_count": len(auto_replies), "notes_count": len(notes),
         }
     }
 
-
 async def refresh_panel_state():
-    try:
-        _atomic_write_json(STATE_FILE, await build_panel_state())
-    except Exception:
-        pass
-
+    try: _atomic_write_json(STATE_FILE, await build_panel_state())
+    except Exception: pass
 
 async def panel_state_loop():
-    """ارسال مداوم وضعیت به فایل مشترک"""
     while True:
         await refresh_panel_state()
         await asyncio.sleep(15)
 
-
 async def execute_panel_action(item):
-    """اجرای یک دستور دریافتی از پنل"""
     global always_online_enabled, tag_logger_on, anti_login_enabled
+    global afk_mode, signature_on, auto_delete_seconds
     name = item.get("action", "")
     try:
-        if name == "toggle_online":
-            always_online_enabled = not always_online_enabled
-        elif name == "toggle_taglogger":
-            tag_logger_on = not tag_logger_on
-        elif name == "toggle_antilogin":
-            anti_login_enabled = not anti_login_enabled
-        elif name == "action_typing":
-            action_settings["typing"] = not action_settings["typing"]
-        elif name == "action_photo":
-            action_settings["upload_photo"] = not action_settings["upload_photo"]
-        elif name == "action_voice":
-            action_settings["record_audio"] = not action_settings["record_audio"]
-        elif name == "action_game":
-            action_settings["playing"] = not action_settings["playing"]
+        if name == "toggle_online": always_online_enabled = not always_online_enabled
+        elif name == "toggle_taglogger": tag_logger_on = not tag_logger_on
+        elif name == "toggle_antilogin": anti_login_enabled = not anti_login_enabled
+        elif name == "toggle_afk":
+            afk_mode = not afk_mode; afk_notified.clear()
+        elif name == "toggle_signature": signature_on = not signature_on
+        elif name == "toggle_autodel": auto_delete_seconds = 0 if auto_delete_seconds else 30
+        elif name == "action_typing": action_settings["typing"] = not action_settings["typing"]
+        elif name == "action_photo": action_settings["upload_photo"] = not action_settings["upload_photo"]
+        elif name == "action_voice": action_settings["record_audio"] = not action_settings["record_audio"]
+        elif name == "action_game": action_settings["playing"] = not action_settings["playing"]
         elif name == "action_reset":
-            for k in action_settings:
-                action_settings[k] = False
-        elif name == "format_bold":
-            format_settings["بولد"] = not format_settings["بولد"]
-        elif name == "format_italic":
-            format_settings["ایتالیک"] = not format_settings["ایتالیک"]
-        elif name == "format_underline":
-            format_settings["زیر خط"] = not format_settings["زیر خط"]
-        elif name == "format_strike":
-            format_settings["خط‌ خورده"] = not format_settings["خط‌ خورده"]
-        elif name == "format_spoiler":
-            format_settings["اسپویلر"] = not format_settings["اسپویلر"]
-        elif name == "format_code":
-            format_settings["کد"] = not format_settings["کد"]
+            for k in action_settings: action_settings[k] = False
+        elif name == "format_bold": format_settings["بولد"] = not format_settings["بولد"]
+        elif name == "format_italic": format_settings["ایتالیک"] = not format_settings["ایتالیک"]
+        elif name == "format_underline": format_settings["زیر خط"] = not format_settings["زیر خط"]
+        elif name == "format_strike": format_settings["خط‌ خورده"] = not format_settings["خط‌ خورده"]
+        elif name == "format_spoiler": format_settings["اسپویلر"] = not format_settings["اسپویلر"]
+        elif name == "format_code": format_settings["کد"] = not format_settings["کد"]
         elif name == "format_reset":
-            for k in format_settings:
-                format_settings[k] = False
-        elif name == "lock_all":
-            lock_settings["همه"] = not lock_settings["همه"]
-        elif name == "lock_media":
-            lock_settings["مدیا"] = not lock_settings["مدیا"]
-        elif name == "lock_sticker":
-            lock_settings["استیکر"] = not lock_settings["استیکر"]
-        elif name == "lock_forward":
-            lock_settings["فوروارد"] = not lock_settings["فوروارد"]
-        elif name == "lock_voice":
-            lock_settings["ویس"] = not lock_settings["ویس"]
-        elif name == "lock_text":
-            lock_settings["پیام"] = not lock_settings["پیام"]
-        elif name == "lock_file":
-            lock_settings["فایل"] = not lock_settings["فایل"]
+            for k in format_settings: format_settings[k] = False
+        elif name == "lock_all": lock_settings["همه"] = not lock_settings["همه"]
+        elif name == "lock_media": lock_settings["مدیا"] = not lock_settings["مدیا"]
+        elif name == "lock_sticker": lock_settings["استیکر"] = not lock_settings["استیکر"]
+        elif name == "lock_forward": lock_settings["فوروارد"] = not lock_settings["فوروارد"]
+        elif name == "lock_voice": lock_settings["ویس"] = not lock_settings["ویس"]
+        elif name == "lock_text": lock_settings["پیام"] = not lock_settings["پیام"]
+        elif name == "lock_file": lock_settings["فایل"] = not lock_settings["فایل"]
         elif name == "lock_reset":
-            for k in lock_settings:
-                lock_settings[k] = False
+            for k in lock_settings: lock_settings[k] = False
         elif name == "time_on":
             me = await app.get_me()
             user_time_status[me.id] = True
             user_original_names.setdefault(me.id, me.first_name or "")
-            await app.update_profile(first_name=f"{user_original_names.get(me.id)} {datetime.now(pytz.timezone('Asia/Tehran')).strftime('%H:%M')}")
+            await app.update_profile(first_name=f"{user_original_names.get(me.id)} {fa_time_str(user_fonts.get(me.id, 1))}")
         elif name == "time_off":
             me = await app.get_me()
             user_time_status[me.id] = False
             if me.id in user_original_names:
                 await app.update_profile(first_name=user_original_names[me.id])
-    except Exception:
-        pass
+    except Exception: pass
     await refresh_panel_state()
 
-
 async def panel_actions_loop():
-    """خواندن و اجرای صف دستورات پنل (اگر سلف آف باشد، دستورات نگه‌داری می‌شوند)"""
     while True:
         try:
             if os.path.exists(ACTIONS_FILE):
@@ -645,25 +1390,58 @@ async def panel_actions_loop():
                     raw = f.read().strip()
                 items = json.loads(raw) if raw else []
                 if items:
-                    try:
-                        os.remove(ACTIONS_FILE)
-                    except Exception:
-                        pass
+                    try: os.remove(ACTIONS_FILE)
+                    except Exception: pass
                     for item in items:
                         if isinstance(item, dict):
                             await execute_panel_action(item)
-        except Exception:
-            pass
+        except Exception: pass
         await asyncio.sleep(0.7)
 
+async def online_loop():
+    while True:
+        if always_online_enabled:
+            try: await app.invoke(rawfn.account.UpdateStatus(offline=False))
+            except Exception: pass
+        await asyncio.sleep(25)
+
+async def time_loop():
+    while True:
+        try:
+            me = await app.get_me()
+            if user_time_status.get(me.id):
+                fid = user_fonts.get(me.id, 1)
+                orig = user_original_names.get(me.id, me.first_name or "")
+                await app.update_profile(first_name=f"{orig} {fa_time_str(fid)}")
+        except Exception: pass
+        await asyncio.sleep(60)
+
+async def banner_loop():
+    global last_banner
+    while True:
+        if banner_active and banner_active in banners and (time.time() - last_banner) >= max(60, banner_interval_min * 60):
+            last_banner = time.time()
+            text = banners[banner_active]
+            async for d in app.get_dialogs(limit=200):
+                if d.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                    try:
+                        await app.send_message(d.chat.id, text)
+                        await asyncio.sleep(4)
+                    except FloodWait as e:
+                        await asyncio.sleep(e.value)
+                    except Exception: pass
+        await asyncio.sleep(20)
+
 if __name__ == "__main__":
-    if USER_ID: print(f"✅ سلف‌بات برای کاربر {USER_ID} در حال اجرا...")
+    if USER_ID: print(f"✅ سلف‌بات برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
     else: print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
     loop = asyncio.get_event_loop()
     app.start()
-    print("🔗 سیستم پنل پیشرفته فعال شد (حساب کاربری + تنظیمات زنده)")
+    print("🔗 سیستم پنل شاهکار فعال شد")
     try:
-        loop.run_until_complete(asyncio.gather(panel_state_loop(), panel_actions_loop()))
+        loop.run_until_complete(asyncio.gather(
+            panel_state_loop(), panel_actions_loop(),
+            online_loop(), time_loop(), banner_loop()))
     except KeyboardInterrupt:
         pass
     finally:
