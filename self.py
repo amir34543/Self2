@@ -291,23 +291,45 @@ async def handle_glass_menus(client, message):
         raise StopPropagation
 
 # ================== فرمت خودکار + امضا (پیام‌های خروجی) ==================
+async def _is_command_message(client, message):
+    """True اگر پیام یکی از دستورهای سلف‌بات (هندلرهای گروه ۰) باشد"""
+    try:
+        handlers = client.dispatcher.groups.get(0, [])
+        if handlers:
+            for h in handlers:
+                try:
+                    if await h.check(client, message):
+                        return True
+                except Exception:
+                    continue
+            return False
+    except Exception:
+        pass
+    # حالت پشتیبان اگر دسترسی به هندلرها ممکن نبود
+    return (message.text or "").startswith(CMD_STARTERS)
+
 @app.on_message(filters.me & filters.text, group=1)
 async def outgoing_text_handler(client, message):
     text = message.text or ""
-    if user_menu_mode.get(message.from_user.id) == "text" and any(format_settings.values()):
-        ft = text
-        for fmt, is_on in format_settings.items():
-            if is_on: ft = html_tags.get(fmt, "{}").format(ft)
-        try:
-            await message.edit(ft, parse_mode=enums.ParseMode.HTML)
-        except Exception:
-            pass
+    if not text or await _is_command_message(client, message):
         return
-    if signature_on and not text.startswith(CMD_STARTERS) and not text.endswith(signature_text):
-        try:
-            await message.edit(text + "\n\n" + signature_text)
-        except Exception:
-            pass
+    active = [k for k, on in format_settings.items() if on]
+    want_sig = signature_on and not text.endswith(signature_text)
+    if not active and not want_sig:
+        return
+    try:
+        body = message.text.html if hasattr(message.text, "html") else text
+    except Exception:
+        body = text
+    if active:
+        for fmt in active:
+            body = html_tags.get(fmt, "{}").format(body)
+    if want_sig:
+        body += "\n\n" + signature_text
+    try:
+        await message.edit(body, parse_mode=enums.ParseMode.HTML)
+    except Exception:
+        pass
 
 @app.on_message(filters.me & ~filters.service, group=2)
 async def auto_delete_own_handler(client, message):
