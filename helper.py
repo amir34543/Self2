@@ -10,12 +10,6 @@ import logging, asyncio, json, os, time
 from html import escape
 
 try:
-    from pyrogram.types import InlineQueryResultCachedPhoto
-    HAS_CACHED_PHOTO = True
-except ImportError:
-    HAS_CACHED_PHOTO = False
-
-try:
     from pyrogram.errors import MessageNotModified
 except ImportError:
     class MessageNotModified(Exception): pass
@@ -30,7 +24,7 @@ except ImportError:
 
 # توکن را در Railway → Variables با نام HELPER_BOT_TOKEN بگذار (پیشنهادی)
 # یا مستقیم به‌جای PUT_TOKEN_HERE بنویس
-TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis"
+TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "PUT_TOKEN_HERE"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 
@@ -87,34 +81,58 @@ def state_online(state):
     return bool(state) and (time.time() - state.get("updated", 0)) < 90
 
 # ------------------------- بنر پنل (عکس + اسم) -------------------------
-_banner_cache = {"mtime": None, "fid": None}
-_banner_lock = asyncio.Lock()
+# self.py بنر را به همین ربات (پیوی) می‌فرستد؛ هلپر file_id را ذخیره می‌کند
+# و موقع باز شدن پنل بدون هیچ آپلودی از آن استفاده می‌کند (سریع و بدون تاخیر)
+BANNER_FID_FILE = "panel_banner_fid.json"
+_banner = {"fid": None, "owner": None, "sig": None}
 
-def banner_path(state):
-    for p in ((state or {}).get("banner"), BANNER_FILE):
-        if p and os.path.exists(p):
-            return p
-    return None
+def load_banner_cache():
+    try:
+        if os.path.exists(BANNER_FID_FILE):
+            with open(BANNER_FID_FILE, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                _banner.update({k: d.get(k) for k in ("fid", "owner", "sig")})
+    except Exception:
+        pass
 
-async def get_banner_file_id(client, owner_id, state):
-    """بنر را یک‌بار برای خود مالک آپلود می‌کند تا file_id بگیرد و بلافاصله پاکش می‌کند"""
-    path = banner_path(state)
-    if not path:
-        return None
-    mt = os.path.getmtime(path)
-    async with _banner_lock:
-        if _banner_cache["fid"] and _banner_cache["mtime"] == mt:
-            return _banner_cache["fid"]
-        try:
-            msg = await client.send_photo(owner_id, path, disable_notification=True)
-            fid = msg.photo.file_id
-            _banner_cache.update(mtime=mt, fid=fid)
-            try: await msg.delete()
-            except Exception: pass
-            return fid
-        except Exception as e:
-            logging.warning(f"آپلود بنر ناموفق بود (آیا هلپر را /start کرده‌ای؟): {e}")
-            return None
+def save_banner_cache():
+    try:
+        tmp = BANNER_FID_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_banner, f)
+        os.replace(tmp, BANNER_FID_FILE)
+    except Exception:
+        pass
+
+load_banner_cache()
+
+class CachedPhotoResult:
+    """نتیجه اینلاین عکس با file_id — مستقل از نسخه/فورک Pyrogram (مستقیم با raw)"""
+    def __init__(self, id, photo_file_id, caption, reply_markup=None):
+        self.id = id
+        self.photo_file_id = photo_file_id
+        self.caption = caption
+        self.reply_markup = reply_markup
+
+    async def write(self, client):
+        import inspect
+        from pyrogram import raw
+        from pyrogram.file_id import FileId
+        f = FileId.decode(self.photo_file_id)
+        photo = raw.types.InputPhoto(id=f.media_id, access_hash=f.access_hash,
+                                     file_reference=f.file_reference)
+        parsed = await client.parser.parse(self.caption, enums.ParseMode.HTML)
+        rm = None
+        if self.reply_markup:
+            rm = self.reply_markup.write(client)
+            if inspect.isawaitable(rm):
+                rm = await rm
+        return raw.types.InputBotInlineResultPhoto(
+            id=self.id, type="photo", photo=photo,
+            send_message=raw.types.InputBotInlineMessageMediaAuto(
+                message=parsed["message"], entities=parsed.get("entities") or None,
+                reply_markup=rm))
 
 async def edit_view(client, cq, text, kb):
     """ویرایش پیام پنل؛ هم برای پیام متنی و هم برای پیام عکس‌دار (کپشن)"""
@@ -559,29 +577,45 @@ async def show_menu(client, message):
     await message.reply_text(MAIN_TEXT, reply_markup=get_main_keyboard(message.from_user.id),
                              parse_mode=enums.ParseMode.HTML)
 
+@app.on_message(filters.private & filters.photo)
+async def banner_receiver(client, message):
+    """دریافت بنر از self.py (فقط از خود اکانت سلف پذیرفته می‌شود)"""
+    cap = message.caption or ""
+    if not cap.startswith("PANELBANNER|") or not message.from_user:
+        return
+    st = load_self_state()
+    owner = ((st or {}).get("account") or {}).get("id")
+    if not owner or message.from_user.id != owner:
+        logging.warning("🖼 بنر رد شد: فرستنده مجاز نیست یا وضعیت سلف موجود نیست")
+        return
+    _banner.update(fid=message.photo.file_id, owner=owner, sig=cap.split("|", 1)[1])
+    save_banner_cache()
+    logging.info("🖼 بنر پنل دریافت و ذخیره شد")
+    try: await message.delete()
+    except Exception: pass
+
 @app.on_inline_query()
 async def inline_query_handler(client, inline_query):
     q = inline_query.query.strip().lower()
     uid = inline_query.from_user.id
     if q == "panel":
-        # بنر (عکس پروفایل + اسم) فقط برای صاحب سلف ساخته می‌شود
-        fid = None
-        state = load_self_state()
-        if HAS_CACHED_PHOTO and state_online(state) and (state.get("account", {}).get("id") == uid):
-            fid = await get_banner_file_id(client, uid, state)
+        article = InlineQueryResultArticle(
+            id="1", title="🎛 پنل مدیریت سلف",
+            description="حساب کاربری + تنظیمات کامل سلف",
+            input_message_content=InputTextMessageContent(MAIN_TEXT, parse_mode=enums.ParseMode.HTML),
+            reply_markup=get_main_keyboard(uid))
+        fid = _banner["fid"] if _banner.get("owner") == uid else None
         if fid:
-            results = [InlineQueryResultCachedPhoto(
-                id="1", photo_file_id=fid, title="🎛 پنل مدیریت سلف",
-                description="حساب کاربری + تنظیمات کامل سلف",
-                caption=MAIN_TEXT, parse_mode=enums.ParseMode.HTML,
-                reply_markup=get_main_keyboard(uid))]
+            try:
+                await inline_query.answer(
+                    [CachedPhotoResult("1", fid, MAIN_TEXT, get_main_keyboard(uid))],
+                    cache_time=5, is_personal=True)
+                return
+            except Exception as e:
+                logging.warning(f"پنل عکس‌دار ناموفق بود، پنل متنی ارسال می‌شود: {e!r}")
         else:
-            results = [InlineQueryResultArticle(
-                id="1", title="🎛 پنل مدیریت سلف",
-                description="حساب کاربری + تنظیمات کامل سلف",
-                input_message_content=InputTextMessageContent(MAIN_TEXT, parse_mode=enums.ParseMode.HTML),
-                reply_markup=get_main_keyboard(uid))]
-        await inline_query.answer(results, cache_time=5, is_personal=True)
+            logging.info("بنر هنوز آماده نیست (یا کاربر مالک نیست)؛ پنل متنی ارسال شد")
+        await inline_query.answer([article], cache_time=5, is_personal=True)
     elif q == "settings":
         results = [InlineQueryResultArticle(
             id="2", title="⚙️ تنظیمات سلف — پنل دستورات",
