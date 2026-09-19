@@ -186,6 +186,7 @@ CMD_STARTERS = ("بایو", "یوزر", "نام", "ترجمه", "آب", "بار�
 async def panel_command(client, message):
     loading_msg = await message.edit_text("⏳ **در حال باز کردن پنل...**")
     try:
+        await refresh_panel_banner()
         results = await client.get_inline_bot_results(bot_username, "panel")
         if results and results.results:
             await client.send_inline_bot_result(chat_id=message.chat.id,
@@ -1311,6 +1312,120 @@ async def apply_actions_private(client, message): await apply_chat_actions(clien
 async def apply_actions_group(client, message): await apply_chat_actions(client, message)
 
 # ==============================================================================
+# ★ ساخت بنر پنل (عکس پروفایل + اسم) با Pillow ★
+# ==============================================================================
+PANEL_BANNER_FILE = "panel_banner.png"      # خروجی؛ هلپر همین فایل را می‌خواند
+PANEL_TEMPLATE_FILE = "panel_template.png"  # اختیاری: بنر دلخواه خودت (اگر نبود، بنر پیش‌فرض ساخته می‌شود)
+PANEL_FONT_CANDIDATES = [
+    "Vazirmatn-Bold.ttf", "Vazirmatn.ttf", "Vazir-Bold.ttf", "Vazir.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+]
+# موقعیت‌ها به‌صورت نسبت از عرض/ارتفاع بنر (از روی عکسی که فرستادی)
+PANEL_AVATAR_CENTER = (0.823, 0.374)   # مرکز دایره عکس
+PANEL_AVATAR_RADIUS = 0.102            # شعاع دایره (نسبت به عرض)
+PANEL_NAME_CENTER = (0.79, 0.75)       # مرکز کپسول اسم
+PANEL_NAME_BOX_W = 0.272               # عرض کپسول اسم (نسبت به عرض)
+PANEL_ACCENT = (255, 122, 26)          # رنگ نارنجی قاب‌ها
+
+def _panel_font(size):
+    from PIL import ImageFont
+    for path in PANEL_FONT_CANDIDATES:
+        try: return ImageFont.truetype(path, size)
+        except Exception: continue
+    try: return ImageFont.load_default(size=size)
+    except Exception: return ImageFont.load_default()
+
+def _panel_shape_text(text):
+    """درست‌کردن حروف چسبیده و راست‌به‌چپ برای اسم فارسی"""
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        return get_display(arabic_reshaper.reshape(text))
+    except Exception:
+        return text
+
+def _panel_default_template(w=1200, h=520):
+    from PIL import Image, ImageDraw, ImageFont
+    img = Image.new("RGB", (w, h), (14, 14, 18))
+    d = ImageDraw.Draw(img)
+    for y in range(h):   # گرادیان تیره
+        k = y / h
+        d.line([(0, y), (w, y)], fill=(int(14 + 22 * k), int(14 + 10 * k), int(18 + 6 * k)))
+    d.ellipse([-200, h - 260, 500, h + 300], fill=(60, 28, 8))
+    f1, f2 = _panel_font(150), _panel_font(60)
+    d.text((70, 70), "SELF", font=f1, fill=PANEL_ACCENT)
+    d.text((76, 260), "PANEL", font=f2, fill=(235, 235, 235))
+    return img
+
+def make_panel_banner(avatar_path, name, out_path=PANEL_BANNER_FILE, template_path=PANEL_TEMPLATE_FILE):
+    """بنر را می‌سازد و مسیر خروجی را برمی‌گرداند. avatar_path می‌تواند None باشد."""
+    from PIL import Image, ImageDraw, ImageOps
+    try: base = Image.open(template_path).convert("RGB")
+    except Exception: base = _panel_default_template()
+    W, H = base.size
+    ss = 3   # سوپرسمپل برای لبه‌های نرم
+    layer = Image.new("RGBA", (W * ss, H * ss), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+
+    # --- دایره عکس ---
+    cx, cy, r = PANEL_AVATAR_CENTER[0] * W * ss, PANEL_AVATAR_CENTER[1] * H * ss, PANEL_AVATAR_RADIUS * W * ss
+    d.ellipse([cx - r - 7 * ss, cy - r - 7 * ss, cx + r + 7 * ss, cy + r + 7 * ss], fill=(10, 10, 12, 255))
+    d.ellipse([cx - r - 5 * ss, cy - r - 5 * ss, cx + r + 5 * ss, cy + r + 5 * ss], outline=PANEL_ACCENT + (255,), width=4 * ss)
+    size = int(r * 2)
+    try:
+        av = ImageOps.fit(Image.open(avatar_path).convert("RGB"), (size, size), Image.LANCZOS)
+    except Exception:   # بدون عکس: دایره ساده با حرف اول اسم
+        av = Image.new("RGB", (size, size), (40, 40, 48))
+        ad = ImageDraw.Draw(av)
+        ch = (name or "?").strip()[:1] or "?"
+        ft = _panel_font(int(size * 0.5))
+        ch = _panel_shape_text(ch)
+        bb = ad.textbbox((0, 0), ch, font=ft)
+        ad.text(((size - (bb[2] - bb[0])) / 2 - bb[0], (size - (bb[3] - bb[1])) / 2 - bb[1]), ch, font=ft, fill=PANEL_ACCENT)
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).ellipse([0, 0, size - 1, size - 1], fill=255)
+    layer.paste(av, (int(cx - r), int(cy - r)), mask)
+
+    # --- کپسول اسم ---
+    bw, bh = PANEL_NAME_BOX_W * W * ss, 0.15 * H * ss
+    nx, ny = PANEL_NAME_CENTER[0] * W * ss, PANEL_NAME_CENTER[1] * H * ss
+    d.rounded_rectangle([nx - bw / 2, ny - bh / 2, nx + bw / 2, ny + bh / 2], radius=bh / 2,
+                        fill=(20, 16, 12, 235), outline=PANEL_ACCENT + (255,), width=3 * ss)
+    txt = _panel_shape_text((name or "").strip() or "Self")
+    fs = int(bh * 0.62)
+    ft = _panel_font(fs)
+    while d.textlength(txt, font=ft) > bw * 0.86 and fs > 10:   # اسم بلند را کوچک کن
+        fs -= 2; ft = _panel_font(fs)
+    bb = d.textbbox((0, 0), txt, font=ft)
+    d.text((nx - (bb[2] - bb[0]) / 2 - bb[0], ny - (bb[3] - bb[1]) / 2 - bb[1]), txt, font=ft, fill=(255, 255, 255, 255))
+
+    layer = layer.resize((W, H), Image.LANCZOS)
+    base = base.convert("RGBA")
+    base.alpha_composite(layer)
+    base.convert("RGB").save(out_path, "PNG")
+    return out_path
+
+_panel_banner_key = None
+
+async def refresh_panel_banner():
+    """اگر اسم یا عکس پروفایل عوض شده باشد، بنر پنل را دوباره می‌سازد"""
+    global _panel_banner_key
+    try:
+        me = await app.get_me()
+        name = (me.first_name or "").strip()
+        key = (me.photo.big_file_unique_id if me.photo else None, name)
+        if key == _panel_banner_key and os.path.exists(PANEL_BANNER_FILE): return
+        av = None
+        if me.photo:
+            try: av = await app.download_media(me.photo.big_file_id)
+            except Exception: av = None
+        await asyncio.to_thread(make_panel_banner, av, name)
+        _panel_banner_key = key
+    except Exception as e:
+        print("⚠️ ساخت بنر پنل ناموفق بود:", e)
+
+# ==============================================================================
 # ★ سیستم پنل — ارتباط زنده با هلپر (فایل مشترک) ★
 # ==============================================================================
 STATE_FILE = "selfbot_state.json"
@@ -1331,6 +1446,7 @@ async def build_panel_state():
     except Exception: pass
     return {
         "updated": int(time.time()),
+        "banner": os.path.abspath(PANEL_BANNER_FILE),
         "account": {
             "first_name": me.first_name or "", "last_name": me.last_name or "",
             "username": me.username or "", "id": me.id,
@@ -1355,6 +1471,7 @@ async def refresh_panel_state():
 
 async def panel_state_loop():
     while True:
+        await refresh_panel_banner()
         await refresh_panel_state()
         await asyncio.sleep(15)
 
