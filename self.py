@@ -186,7 +186,6 @@ CMD_STARTERS = ("بایو", "یوزر", "نام", "ترجمه", "آب", "بار�
 async def panel_command(client, message):
     loading_msg = await message.edit_text("⏳ **در حال باز کردن پنل...**")
     try:
-        await refresh_panel_banner()
         results = await client.get_inline_bot_results(bot_username, "panel")
         if results and results.results:
             await client.send_inline_bot_result(chat_id=message.chat.id,
@@ -1407,23 +1406,60 @@ def make_panel_banner(avatar_path, name, out_path=PANEL_BANNER_FILE, template_pa
     return out_path
 
 _panel_banner_key = None
+_panel_banner_busy = False
+_panel_banner_uploaded_at = 0
+_panel_banner_next_try = 0
+_bg_tasks = set()
+
+def _spawn(coro):
+    t = asyncio.create_task(coro)
+    _bg_tasks.add(t)
+    t.add_done_callback(_bg_tasks.discard)
+    return t
+
+async def upload_banner_to_helper():
+    """بنر را به پیوی ربات هلپر می‌فرستد تا file_id بگیرد (هلپر خودش پیام را پاک می‌کند)"""
+    global _panel_banner_uploaded_at, _panel_banner_next_try
+    try:
+        sig = str(int(os.path.getmtime(PANEL_BANNER_FILE)))
+        sent = await app.send_photo(bot_username, PANEL_BANNER_FILE, caption=f"PANELBANNER|{sig}")
+        _panel_banner_uploaded_at = time.time()
+        print("🖼 بنر پنل برای هلپر ارسال شد")
+        async def _cleanup():
+            await asyncio.sleep(90)
+            try: await sent.delete(revoke=True)
+            except Exception: pass
+        _spawn(_cleanup())
+    except Exception as e:
+        _panel_banner_next_try = time.time() + 120
+        print("⚠️ ارسال بنر به هلپر ناموفق بود:", e)
 
 async def refresh_panel_banner():
-    """اگر اسم یا عکس پروفایل عوض شده باشد، بنر پنل را دوباره می‌سازد"""
-    global _panel_banner_key
+    """اگر اسم یا عکس پروفایل عوض شده باشد بنر را می‌سازد و برای هلپر می‌فرستد"""
+    global _panel_banner_key, _panel_banner_busy
+    if _panel_banner_busy: return
+    _panel_banner_busy = True
     try:
         me = await app.get_me()
         name = (me.first_name or "").strip()
         key = (me.photo.big_file_unique_id if me.photo else None, name)
-        if key == _panel_banner_key and os.path.exists(PANEL_BANNER_FILE): return
-        av = None
-        if me.photo:
-            try: av = await app.download_media(me.photo.big_file_id)
-            except Exception: av = None
-        await asyncio.to_thread(make_panel_banner, av, name)
-        _panel_banner_key = key
+        changed = key != _panel_banner_key or not os.path.exists(PANEL_BANNER_FILE)
+        if changed:
+            av = None
+            if me.photo:
+                try: av = await app.download_media(me.photo.big_file_id)
+                except Exception: av = None
+            await asyncio.to_thread(make_panel_banner, av, name)
+            _panel_banner_key = key
+            print("🎨 بنر پنل ساخته شد")
+        now = time.time()
+        # هر ۶ ساعت هم دوباره ارسال می‌شود تا file_id تازه بماند
+        if (changed or now - _panel_banner_uploaded_at > 6 * 3600) and now >= _panel_banner_next_try:
+            await upload_banner_to_helper()
     except Exception as e:
         print("⚠️ ساخت بنر پنل ناموفق بود:", e)
+    finally:
+        _panel_banner_busy = False
 
 # ==============================================================================
 # ★ سیستم پنل — ارتباط زنده با هلپر (فایل مشترک) ★
@@ -1471,8 +1507,8 @@ async def refresh_panel_state():
 
 async def panel_state_loop():
     while True:
-        await refresh_panel_banner()
         await refresh_panel_state()
+        _spawn(refresh_panel_banner())
         await asyncio.sleep(15)
 
 async def execute_panel_action(item):
