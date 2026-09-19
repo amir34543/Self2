@@ -1,6 +1,6 @@
 # ==============================================================================
 #  ربات هلپر و پنل مدیریت سلف بات — PersianGulf Helper
-#  نسخه: 7.0.0 «شاهکار» — حساب کاربری + تنظیمات کامل سلف
+#  نسخه: 7.0.0 «شاهکار» — حساب کاربری + تنظیمات کامل سلف + بنر عکس/اسم
 # ==============================================================================
 
 from pyrogram import Client, enums, filters
@@ -10,6 +10,17 @@ import logging, asyncio, json, os, time
 from html import escape
 
 try:
+    from pyrogram.types import InlineQueryResultCachedPhoto
+    HAS_CACHED_PHOTO = True
+except ImportError:
+    HAS_CACHED_PHOTO = False
+
+try:
+    from pyrogram.errors import MessageNotModified
+except ImportError:
+    class MessageNotModified(Exception): pass
+
+try:
     from pyrogram.types import KeyboardButtonStyle
     HAS_STYLE = True
 except ImportError:
@@ -17,15 +28,20 @@ except ImportError:
     class KeyboardButtonStyle:
         def __init__(self, **kw): pass
 
-TOKEN = "8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis"  # توکن ربات هلپر
+# توکن را در Railway → Variables با نام HELPER_BOT_TOKEN بگذار (پیشنهادی)
+# یا مستقیم به‌جای PUT_TOKEN_HERE بنویس
+TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "PUT_TOKEN_HERE"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 
 logging.basicConfig(level=logging.INFO)
+if TOKEN == "PUT_TOKEN_HERE":
+    raise SystemExit("❌ توکن ربات هلپر تنظیم نشده (متغیر HELPER_BOT_TOKEN یا خط TOKEN)")
 app = Client("helper_bot", bot_token=TOKEN, api_id=API_ID, api_hash=API_HASH)
 
 STATE_FILE = "selfbot_state.json"
 ACTIONS_FILE = "panel_actions.json"
+BANNER_FILE = "panel_banner.png"   # توسط self.py ساخته می‌شود
 
 TOGGLE_MAP = {
     "online": "toggle_online", "taglogger": "toggle_taglogger",
@@ -69,6 +85,51 @@ def queue_action(user_id, action):
 
 def state_online(state):
     return bool(state) and (time.time() - state.get("updated", 0)) < 90
+
+# ------------------------- بنر پنل (عکس + اسم) -------------------------
+_banner_cache = {"mtime": None, "fid": None}
+_banner_lock = asyncio.Lock()
+
+def banner_path(state):
+    for p in ((state or {}).get("banner"), BANNER_FILE):
+        if p and os.path.exists(p):
+            return p
+    return None
+
+async def get_banner_file_id(client, owner_id, state):
+    """بنر را یک‌بار برای خود مالک آپلود می‌کند تا file_id بگیرد و بلافاصله پاکش می‌کند"""
+    path = banner_path(state)
+    if not path:
+        return None
+    mt = os.path.getmtime(path)
+    async with _banner_lock:
+        if _banner_cache["fid"] and _banner_cache["mtime"] == mt:
+            return _banner_cache["fid"]
+        try:
+            msg = await client.send_photo(owner_id, path, disable_notification=True)
+            fid = msg.photo.file_id
+            _banner_cache.update(mtime=mt, fid=fid)
+            try: await msg.delete()
+            except Exception: pass
+            return fid
+        except Exception as e:
+            logging.warning(f"آپلود بنر ناموفق بود (آیا هلپر را /start کرده‌ای؟): {e}")
+            return None
+
+async def edit_view(client, cq, text, kb):
+    """ویرایش پیام پنل؛ هم برای پیام متنی و هم برای پیام عکس‌دار (کپشن)"""
+    try:
+        if cq.inline_message_id:
+            fn = getattr(client, "edit_inline_caption", None) or client.edit_inline_text
+            await fn(cq.inline_message_id, text, parse_mode=enums.ParseMode.HTML, reply_markup=kb)
+        else:
+            await cq.edit_message_text(text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
+    except MessageNotModified:
+        pass
+    except Exception as e:
+        if "MESSAGE_NOT_MODIFIED" in str(e):
+            return
+        raise
 
 # ------------------------- دکمه‌ها -------------------------
 def btn(text, cb, style=None):
@@ -472,7 +533,7 @@ def formats_page_text(state):
     return (head + "\n\n"
             f"🅱 بولد: {on('بولد')}\n🅸 ایتالیک: {on('ایتالیک')}\n🅄 زیر خط: {on('زیر خط')}\n"
             f"🅂 خط‌خورده: {on('خط‌ خورده')}\n🆂 اسپویلر: {on('اسپویلر')}\n🅲 کد: {on('کد')}\n\n"
-            "وقتی «منوی متن» باز است، پیام‌ها با این فرمت‌ها ارسال می‌شوند.")
+            "هر فرمتی که 🟢 باشد روی پیام‌های عادی شما اعمال می‌شود.")
 
 def locks_page_text(state):
     head = "🔒 <b>قفل‌های پیوی</b>" if state_online(state) else "⚠️ <b>سلف آفلاین است</b>"
@@ -503,11 +564,23 @@ async def inline_query_handler(client, inline_query):
     q = inline_query.query.strip().lower()
     uid = inline_query.from_user.id
     if q == "panel":
-        results = [InlineQueryResultArticle(
-            id="1", title="🎛 پنل مدیریت سلف",
-            description="حساب کاربری + تنظیمات کامل سلف",
-            input_message_content=InputTextMessageContent(MAIN_TEXT, parse_mode=enums.ParseMode.HTML),
-            reply_markup=get_main_keyboard(uid))]
+        # بنر (عکس پروفایل + اسم) فقط برای صاحب سلف ساخته می‌شود
+        fid = None
+        state = load_self_state()
+        if HAS_CACHED_PHOTO and state_online(state) and (state.get("account", {}).get("id") == uid):
+            fid = await get_banner_file_id(client, uid, state)
+        if fid:
+            results = [InlineQueryResultCachedPhoto(
+                id="1", photo_file_id=fid, title="🎛 پنل مدیریت سلف",
+                description="حساب کاربری + تنظیمات کامل سلف",
+                caption=MAIN_TEXT, parse_mode=enums.ParseMode.HTML,
+                reply_markup=get_main_keyboard(uid))]
+        else:
+            results = [InlineQueryResultArticle(
+                id="1", title="🎛 پنل مدیریت سلف",
+                description="حساب کاربری + تنظیمات کامل سلف",
+                input_message_content=InputTextMessageContent(MAIN_TEXT, parse_mode=enums.ParseMode.HTML),
+                reply_markup=get_main_keyboard(uid))]
         await inline_query.answer(results, cache_time=5, is_personal=True)
     elif q == "settings":
         results = [InlineQueryResultArticle(
@@ -533,44 +606,40 @@ async def callback_query_handler(client, cq):
 
     if action == "close":
         try:
-            await cq.edit_message_text(
+            await edit_view(client, cq,
                 "✅ <b>پنل بسته شد</b>\n\n💡 برای باز کردن: <code>/start</code>",
-                reply_markup=InlineKeyboardMarkup([[btn("🔄 بازکردن پنل", f"p:home:{uid}", S("s"))]]),
-                parse_mode=enums.ParseMode.HTML)
+                InlineKeyboardMarkup([[btn("🔄 بازکردن پنل", f"p:home:{uid}", S("s"))]]))
         except Exception:
             pass
         await cq.answer()
         return
 
     if action in ("home", "reopen"):
-        await cq.edit_message_text(MAIN_TEXT, reply_markup=get_main_keyboard(uid),
-                                   parse_mode=enums.ParseMode.HTML)
+        await edit_view(client, cq, MAIN_TEXT, get_main_keyboard(uid))
         await cq.answer()
         return
 
     if action == "back":
         target = arg if arg in ("cats", "home", "live") else "cats"
         if target == "home":
-            await cq.edit_message_text(MAIN_TEXT, reply_markup=get_main_keyboard(uid), parse_mode=enums.ParseMode.HTML)
+            await edit_view(client, cq, MAIN_TEXT, get_main_keyboard(uid))
         elif target == "live":
             st = load_self_state()
-            await cq.edit_message_text(settings_page_text(st), reply_markup=get_live_keyboard(uid, st), parse_mode=enums.ParseMode.HTML)
+            await edit_view(client, cq, settings_page_text(st), get_live_keyboard(uid, st))
         else:
-            await cq.edit_message_text(CATS_TEXT, reply_markup=get_categories_keyboard(uid), parse_mode=enums.ParseMode.HTML)
+            await edit_view(client, cq, CATS_TEXT, get_categories_keyboard(uid))
         await cq.answer()
         return
 
     if action == "cats":
-        await cq.edit_message_text(CATS_TEXT, reply_markup=get_categories_keyboard(uid),
-                                   parse_mode=enums.ParseMode.HTML)
+        await edit_view(client, cq, CATS_TEXT, get_categories_keyboard(uid))
         await cq.answer()
         return
 
     if action == "cat":
         t = CAT_TEXTS.get(arg)
         if t:
-            await cq.edit_message_text(t, reply_markup=get_back_keyboard(uid, "cats"),
-                                       parse_mode=enums.ParseMode.HTML)
+            await edit_view(client, cq, t, get_back_keyboard(uid, "cats"))
             await cq.answer()
         else:
             await cq.answer("این بخش آماده نیست!", show_alert=True)
@@ -578,16 +647,14 @@ async def callback_query_handler(client, cq):
 
     if action == "account":
         st = load_self_state()
-        await cq.edit_message_text(build_account_text(st), reply_markup=get_account_keyboard(uid),
-                                   parse_mode=enums.ParseMode.HTML)
+        await edit_view(client, cq, build_account_text(st), get_account_keyboard(uid))
         await cq.answer()
         return
 
     if action in SUB_PAGES:
         st = load_self_state()
         text_fn, kb_fn = SUB_PAGES[action]
-        await cq.edit_message_text(text_fn(st), reply_markup=kb_fn(uid, st),
-                                   parse_mode=enums.ParseMode.HTML)
+        await edit_view(client, cq, text_fn(st), kb_fn(uid, st))
         await cq.answer()
         return
 
@@ -600,7 +667,7 @@ async def callback_query_handler(client, cq):
         parent = extra if extra in SUB_PAGES else "live"
         text_fn, kb_fn = SUB_PAGES[parent]
         try:
-            await cq.edit_message_text(text_fn(st), reply_markup=kb_fn(uid, st), parse_mode=enums.ParseMode.HTML)
+            await edit_view(client, cq, text_fn(st), kb_fn(uid, st))
         except Exception:
             pass
         return
