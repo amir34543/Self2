@@ -291,7 +291,7 @@ async def handle_glass_menus(client, message):
         raise StopPropagation
 
 # ================== فرمت خودکار + امضا (پیام‌های خروجی) ==================
-@app.on_message(filters.me & filters.text)
+@app.on_message(filters.me & filters.text, group=1)
 async def outgoing_text_handler(client, message):
     text = message.text or ""
     if user_menu_mode.get(message.from_user.id) == "text" and any(format_settings.values()):
@@ -309,7 +309,7 @@ async def outgoing_text_handler(client, message):
         except Exception:
             pass
 
-@app.on_message(filters.me & ~filters.service)
+@app.on_message(filters.me & ~filters.service, group=2)
 async def auto_delete_own_handler(client, message):
     if auto_delete_seconds > 0:
         async def _later():
@@ -1437,6 +1437,9 @@ async def banner_loop():
 if __name__ == "__main__":
     if USER_ID: print(f"✅ سلف‌بات برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
     else: print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
+    if not USER_ID and not os.path.exists("self.session"):
+        print("❌ بدون آرگومان و بدون فایل self.session اجرا شد؛ این پروسه لازم نیست (سلف‌بات را هلپر اجرا می‌کند). خروج.")
+        sys.exit(0)
     loop = asyncio.get_event_loop()
     app.start()
     print("🔗 سیستم پنل شاهکار فعال شد")
