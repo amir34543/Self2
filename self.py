@@ -497,7 +497,174 @@ async def ping_command(client, message):
     s = datetime.now(); m = await message.edit("**⏳ ...**")
     await m.edit(f"**🏓 پونگ!**\n**⏱ سرعت: {(datetime.now() - s).microseconds / 1000:.2f} ms**")
 
+
+# ==============================================================================
+# ★★★ سیستم پنل پیشرفته - ارتباط زنده با ربات هلپر (فایل مشترک) ★★★
+# سلف هر 15 ثانیه وضعیت+حساب را در selfbot_state.json می‌نویسد
+# دستورات پنل از panel_actions.json خوانده و اجرا می‌شوند (صف)
+# ==============================================================================
+
+import time
+
+STATE_FILE = "selfbot_state.json"
+ACTIONS_FILE = "panel_actions.json"
+
+
+def _atomic_write_json(path, data):
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+async def build_panel_state():
+    """ساخت اسنپ‌شات کامل از حساب و تنظیمات سلف"""
+    me = await app.get_me()
+    bio = ""
+    try:
+        bio = (await app.get_chat(me.id)).bio or ""
+    except Exception:
+        pass
+    return {
+        "updated": int(time.time()),
+        "account": {
+            "first_name": me.first_name or "",
+            "last_name": me.last_name or "",
+            "username": me.username or "",
+            "id": me.id,
+            "premium": bool(getattr(me, "is_premium", False)),
+            "phone": me.phone_number or "",
+            "bio": bio,
+        },
+        "settings": {
+            "always_online": always_online_enabled,
+            "tag_logger": tag_logger_on,
+            "anti_login": anti_login_enabled,
+            "time_on": bool(user_time_status.get(me.id)),
+            "actions": dict(action_settings),
+            "formats": dict(format_settings),
+            "locks": dict(lock_settings),
+            "enemies_count": len(enemies),
+            "reactions_count": len(auto_reactions),
+        }
+    }
+
+
+async def refresh_panel_state():
+    try:
+        _atomic_write_json(STATE_FILE, await build_panel_state())
+    except Exception:
+        pass
+
+
+async def panel_state_loop():
+    """ارسال مداوم وضعیت به فایل مشترک"""
+    while True:
+        await refresh_panel_state()
+        await asyncio.sleep(15)
+
+
+async def execute_panel_action(item):
+    """اجرای یک دستور دریافتی از پنل"""
+    global always_online_enabled, tag_logger_on, anti_login_enabled
+    name = item.get("action", "")
+    try:
+        if name == "toggle_online":
+            always_online_enabled = not always_online_enabled
+        elif name == "toggle_taglogger":
+            tag_logger_on = not tag_logger_on
+        elif name == "toggle_antilogin":
+            anti_login_enabled = not anti_login_enabled
+        elif name == "action_typing":
+            action_settings["typing"] = not action_settings["typing"]
+        elif name == "action_photo":
+            action_settings["upload_photo"] = not action_settings["upload_photo"]
+        elif name == "action_voice":
+            action_settings["record_audio"] = not action_settings["record_audio"]
+        elif name == "action_game":
+            action_settings["playing"] = not action_settings["playing"]
+        elif name == "action_reset":
+            for k in action_settings:
+                action_settings[k] = False
+        elif name == "format_bold":
+            format_settings["بولد"] = not format_settings["بولد"]
+        elif name == "format_italic":
+            format_settings["ایتالیک"] = not format_settings["ایتالیک"]
+        elif name == "format_underline":
+            format_settings["زیر خط"] = not format_settings["زیر خط"]
+        elif name == "format_strike":
+            format_settings["خط‌ خورده"] = not format_settings["خط‌ خورده"]
+        elif name == "format_spoiler":
+            format_settings["اسپویلر"] = not format_settings["اسپویلر"]
+        elif name == "format_code":
+            format_settings["کد"] = not format_settings["کد"]
+        elif name == "format_reset":
+            for k in format_settings:
+                format_settings[k] = False
+        elif name == "lock_all":
+            lock_settings["همه"] = not lock_settings["همه"]
+        elif name == "lock_media":
+            lock_settings["مدیا"] = not lock_settings["مدیا"]
+        elif name == "lock_sticker":
+            lock_settings["استیکر"] = not lock_settings["استیکر"]
+        elif name == "lock_forward":
+            lock_settings["فوروارد"] = not lock_settings["فوروارد"]
+        elif name == "lock_voice":
+            lock_settings["ویس"] = not lock_settings["ویس"]
+        elif name == "lock_text":
+            lock_settings["پیام"] = not lock_settings["پیام"]
+        elif name == "lock_file":
+            lock_settings["فایل"] = not lock_settings["فایل"]
+        elif name == "lock_reset":
+            for k in lock_settings:
+                lock_settings[k] = False
+        elif name == "time_on":
+            me = await app.get_me()
+            user_time_status[me.id] = True
+            user_original_names.setdefault(me.id, me.first_name or "")
+            await app.update_profile(first_name=f"{user_original_names.get(me.id)} {datetime.now(pytz.timezone('Asia/Tehran')).strftime('%H:%M')}")
+        elif name == "time_off":
+            me = await app.get_me()
+            user_time_status[me.id] = False
+            if me.id in user_original_names:
+                await app.update_profile(first_name=user_original_names[me.id])
+    except Exception:
+        pass
+    await refresh_panel_state()
+
+
+async def panel_actions_loop():
+    """خواندن و اجرای صف دستورات پنل (اگر سلف آف باشد، دستورات نگه‌داری می‌شوند)"""
+    while True:
+        try:
+            if os.path.exists(ACTIONS_FILE):
+                with open(ACTIONS_FILE, "r", encoding="utf-8") as f:
+                    raw = f.read().strip()
+                items = json.loads(raw) if raw else []
+                if items:
+                    try:
+                        os.remove(ACTIONS_FILE)
+                    except Exception:
+                        pass
+                    for item in items:
+                        if isinstance(item, dict):
+                            await execute_panel_action(item)
+        except Exception:
+            pass
+        await asyncio.sleep(0.7)
+
 if __name__ == "__main__":
     if USER_ID: print(f"✅ سلف‌بات برای کاربر {USER_ID} در حال اجرا...")
     else: print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
-    app.run()
+    loop = asyncio.get_event_loop()
+    app.start()
+    print("🔗 سیستم پنل پیشرفته فعال شد (حساب کاربری + تنظیمات زنده)")
+    try:
+        loop.run_until_complete(asyncio.gather(panel_state_loop(), panel_actions_loop()))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        app.stop()
