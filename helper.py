@@ -30,7 +30,7 @@ except ImportError:
 
 # توکن را در Railway → Variables با نام HELPER_BOT_TOKEN بگذار (پیشنهادی)
 # یا مستقیم به‌جای PUT_TOKEN_HERE بنویس
-TOKEN = os.environ.get("8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis") or "PUT_TOKEN_HERE"
+TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 
