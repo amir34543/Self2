@@ -30,6 +30,28 @@ if len(sys.argv) > 4: API_HASH = sys.argv[4]
 session_name = f"sessions/{USER_ID}" if USER_ID else "self"
 app = Client(session_name, api_id=API_ID, api_hash=API_HASH)
 
+# --- کش get_me: هر get_me یک درخواست users.GetFullUser است و فراخوانی مکرر FLOOD_WAIT می‌دهد ---
+_orig_get_me = app.get_me
+_me_cache = {"me": None, "ts": 0.0}
+ME_CACHE_TTL = 90
+
+async def _cached_get_me(*args, **kwargs):
+    now = time.time()
+    if _me_cache["me"] is None or now - _me_cache["ts"] > ME_CACHE_TTL:
+        try:
+            _me_cache["me"] = await _orig_get_me()
+            _me_cache["ts"] = now
+        except FloodWait as e:
+            if _me_cache["me"] is None:
+                await asyncio.sleep(e.value + 1)
+                _me_cache["me"] = await _orig_get_me()
+                _me_cache["ts"] = time.time()
+            else:
+                _me_cache["ts"] = now + e.value   # تا پایان فلود از کش استفاده کن
+    return _me_cache["me"]
+
+app.get_me = _cached_get_me
+
 # ================== فایل‌ها و پوشه‌ها ==================
 SAVED_PHOTOS_DIR = "saved_photos"
 INSULTS_FILE = "insults.txt"
@@ -1407,6 +1429,7 @@ def make_panel_banner(avatar_path, name, out_path=PANEL_BANNER_FILE, template_pa
 
 _panel_banner_key = None
 _panel_banner_busy = False
+_panel_banner_backoff = 0
 _panel_banner_uploaded_at = 0
 _panel_banner_next_try = 0
 _bg_tasks = set()
@@ -1436,13 +1459,20 @@ async def upload_banner_to_helper():
 
 async def refresh_panel_banner():
     """اگر اسم یا عکس پروفایل عوض شده باشد بنر را می‌سازد و برای هلپر می‌فرستد"""
-    global _panel_banner_key, _panel_banner_busy
-    if _panel_banner_busy: return
+    global _panel_banner_key, _panel_banner_busy, _panel_banner_backoff
+    if _panel_banner_busy or time.time() < _panel_banner_backoff: return
     _panel_banner_busy = True
     try:
         me = await app.get_me()
         name = (me.first_name or "").strip()
-        key = (me.photo.big_file_unique_id if me.photo else None, name)
+        if user_time_status.get(me.id) and user_original_names.get(me.id):
+            name = user_original_names[me.id].strip()   # اسم بدون ساعت
+        ph = me.photo
+        pid = None
+        if ph:
+            pid = (getattr(ph, "big_photo_unique_id", None) or getattr(ph, "big_file_unique_id", None)
+                   or getattr(ph, "big_file_id", None))
+        key = (pid, name)
         changed = key != _panel_banner_key or not os.path.exists(PANEL_BANNER_FILE)
         if changed:
             av = None
@@ -1457,7 +1487,10 @@ async def refresh_panel_banner():
         if (changed or now - _panel_banner_uploaded_at > 6 * 3600) and now >= _panel_banner_next_try:
             await upload_banner_to_helper()
     except Exception as e:
-        print("⚠️ ساخت بنر پنل ناموفق بود:", e)
+        _panel_banner_backoff = time.time() + 60
+        import traceback
+        print("⚠️ ساخت بنر پنل ناموفق بود [r6]:", repr(e))
+        print(traceback.format_exc())
     finally:
         _panel_banner_busy = False
 
@@ -1475,11 +1508,15 @@ def _atomic_write_json(path, data):
         os.replace(tmp, path)
     except Exception: pass
 
+_bio_cache = {"bio": "", "ts": 0.0}
+
 async def build_panel_state():
     me = await app.get_me()
-    bio = ""
-    try: bio = (await app.get_chat(me.id)).bio or ""
-    except Exception: pass
+    bio = _bio_cache["bio"]
+    if time.time() - _bio_cache["ts"] > 300:
+        _bio_cache["ts"] = time.time()
+        try: bio = _bio_cache["bio"] = (await app.get_chat(me.id)).bio or ""
+        except Exception: pass
     return {
         "updated": int(time.time()),
         "banner": os.path.abspath(PANEL_BANNER_FILE),
@@ -1610,6 +1647,7 @@ async def banner_loop():
         await asyncio.sleep(20)
 
 if __name__ == "__main__":
+    print("🧩 نسخه فایل: self.py | build panel-banner-r6 | ", os.path.abspath(__file__))
     if USER_ID: print(f"✅ سلف‌بات برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
     else: print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
     if not USER_ID and not os.path.exists("self.session"):
