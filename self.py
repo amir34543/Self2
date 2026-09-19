@@ -795,7 +795,9 @@ async def weather_cmd(client, message):
     if len(message.command) < 2: return await message.edit("❌ `آب و هوا تهران`")
     m = await message.edit("🌤 در حال دریافت...")
     try:
-        await m.edit(f"🌤 **آب و هوا**\n📍 {requests.get(f'https://wttr.in/{\" \".join(message.command[1:])}?format=%l:+%c+%t+%h+%w').text}")
+        city = urllib.parse.quote(" ".join(message.command[1:]))
+        res = requests.get(f"https://wttr.in/{city}?format=%l:+%c+%t+%h+%w", timeout=15).text
+        await m.edit(f"🌤 **آب و هوا**\n📍 {res}")
     except Exception: pass
 
 @app.on_message(filters.me & filters.command("بارکد", prefixes=""))
