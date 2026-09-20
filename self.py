@@ -1503,7 +1503,7 @@ async def refresh_panel_banner():
     except Exception as e:
         _panel_banner_backoff = time.time() + 60
         import traceback
-        print("⚠️ ساخت بنر پنل ناموفق بود [r7]:", repr(e))
+        print("⚠️ ساخت بنر پنل ناموفق بود [r8]:", repr(e))
         print(traceback.format_exc())
     finally:
         _panel_banner_busy = False
@@ -1523,6 +1523,7 @@ def _atomic_write_json(path, data):
     except Exception: pass
 
 _bio_cache = {"bio": "", "ts": 0.0}
+last_action_ts = 0.0
 
 async def build_panel_state():
     me = await app.get_me()
@@ -1533,6 +1534,7 @@ async def build_panel_state():
         except Exception: pass
     return {
         "updated": int(time.time()),
+        "last_action_ts": last_action_ts,
         "banner": os.path.abspath(PANEL_BANNER_FILE),
         "account": {
             "first_name": me.first_name or "", "last_name": me.last_name or "",
@@ -1564,9 +1566,15 @@ async def panel_state_loop():
 
 async def execute_panel_action(item):
     global always_online_enabled, tag_logger_on, anti_login_enabled
-    global afk_mode, signature_on, auto_delete_seconds
+    global afk_mode, signature_on, auto_delete_seconds, last_action_ts
     name = item.get("action", "")
     try:
+        # امنیت: فقط دستوری که از طرف خود صاحب اکانت آمده اجرا شود
+        me0 = await app.get_me()
+        if item.get("user_id") != me0.id:
+            return
+        if name == "toggle_time":
+            name = "time_off" if user_time_status.get(me0.id) else "time_on"
         if name == "toggle_online": always_online_enabled = not always_online_enabled
         elif name == "toggle_taglogger": tag_logger_on = not tag_logger_on
         elif name == "toggle_antilogin": anti_login_enabled = not anti_login_enabled
@@ -1607,6 +1615,8 @@ async def execute_panel_action(item):
             user_time_status[me.id] = False
             if me.id in user_original_names:
                 await app.update_profile(first_name=user_original_names[me.id])
+    except Exception: pass
+    try: last_action_ts = max(last_action_ts, float(item.get("ts", 0)))
     except Exception: pass
     await refresh_panel_state()
 
@@ -1661,7 +1671,7 @@ async def banner_loop():
         await asyncio.sleep(20)
 
 if __name__ == "__main__":
-    print("🧩 Persian Gulf Self | build panel-banner-r7 |", os.path.abspath(__file__))
+    print("🧩 Persian Gulf Self | build panel-glass-r8 |", os.path.abspath(__file__))
     if USER_ID: print(f"✅ Persian Gulf Self برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
     else: print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
     if not USER_ID and not os.path.exists("self.session"):
