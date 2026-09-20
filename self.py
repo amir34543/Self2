@@ -1350,10 +1350,16 @@ PANEL_NAME_BOX_W = 0.217               # عرض کپسول اسم (نسبت به
 PANEL_NAME_BOX_H = 0.09               # ارتفاع کپسول اسم (نسبت به ارتفاع)
 PANEL_ACCENT = (255, 205, 90)          # رنگ طلایی قاب‌ها
 
+def _panel_res(path):
+    """فایل را اول نسبت به پوشه جاری و بعد کنار خود self.py پیدا می‌کند"""
+    if os.path.isabs(path) or os.path.exists(path): return path
+    alt = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+    return alt if os.path.exists(alt) else path
+
 def _panel_font(size):
     from PIL import ImageFont
     for path in PANEL_FONT_CANDIDATES:
-        try: return ImageFont.truetype(path, size)
+        try: return ImageFont.truetype(_panel_res(path), size)
         except Exception: continue
     try: return ImageFont.load_default(size=size)
     except Exception: return ImageFont.load_default()
@@ -1389,7 +1395,7 @@ def _panel_default_template(w=1200, h=520):
 def make_panel_banner(avatar_path, name, out_path=PANEL_BANNER_FILE, template_path=PANEL_TEMPLATE_FILE):
     """بنر را می‌سازد و مسیر خروجی را برمی‌گرداند. avatar_path می‌تواند None باشد."""
     from PIL import Image, ImageDraw, ImageOps
-    try: base = Image.open(template_path).convert("RGB")
+    try: base = Image.open(_panel_res(template_path)).convert("RGB")
     except Exception: base = _panel_default_template()
     W, H = base.size
     ss = 3   # سوپرسمپل برای لبه‌های نرم
