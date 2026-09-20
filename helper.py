@@ -24,7 +24,7 @@ except ImportError:
 
 # توکن را در Railway → Variables با نام HELPER_BOT_TOKEN بگذار (پیشنهادی)
 # یا مستقیم به‌جای PUT_TOKEN_HERE بنویس
-TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis"
+TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "PUT_TOKEN_HERE"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 
@@ -49,6 +49,11 @@ TOGGLE_MAP = {
     "lock_all": "lock_all", "lock_media": "lock_media", "lock_sticker": "lock_sticker",
     "lock_forward": "lock_forward", "lock_voice": "lock_voice",
     "lock_text": "lock_text", "lock_file": "lock_file", "lock_reset": "lock_reset",
+    # نام‌های state که دکمه‌های «تنظیمات زنده» استفاده می‌کنند (قبلاً نگاشت نداشتند و اعمال نمی‌شدند)
+    "always_online": "toggle_online", "tag_logger": "toggle_taglogger",
+    "anti_login": "toggle_antilogin", "auto_delete": "toggle_autodel",
+    "upload_photo": "action_photo", "record_audio": "action_voice", "playing": "action_game",
+    "time_on": "toggle_time",
 }
 
 # ------------------------- ابزار فایل -------------------------
@@ -71,14 +76,26 @@ def queue_action(user_id, action):
             if not isinstance(items, list): items = []
     except Exception:
         items = []
-    items.append({"user_id": user_id, "action": action, "ts": time.time()})
+    ts = time.time()
+    items.append({"user_id": user_id, "action": action, "ts": ts})
     tmp = ACTIONS_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(items, f, ensure_ascii=False)
     os.replace(tmp, ACTIONS_FILE)
+    return ts
 
 def state_online(state):
     return bool(state) and (time.time() - state.get("updated", 0)) < 90
+
+async def wait_for_action(ts, timeout=4.0):
+    """صبر می‌کند تا سلف دستور را اجرا کند و state تازه بنویسد (حداکثر چند ثانیه)"""
+    end = time.time() + timeout
+    while time.time() < end:
+        st = load_self_state()
+        if st and st.get("last_action_ts", 0) >= ts:
+            return st
+        await asyncio.sleep(0.2)
+    return load_self_state()
 
 # ------------------------- بنر پنل (عکس + اسم) -------------------------
 # self.py بنر را به همین ربات (پیوی) می‌فرستد؛ هلپر file_id را ذخیره می‌کند
@@ -205,7 +222,7 @@ def get_categories_keyboard(uid):
     for i in range(0, len(c), 2):
         pair = c[i:i+2]
         rows.append([btn(t, f"p:cat:{uid}:{k}", S("p")) for t, k in pair])
-    rows.append([btn("✨ منوهای شیشه‌ای", f"p:cat:{uid}:extra", S("s"))])
+    rows.append([btn("🎭 اکشن‌های چت", f"p:cat:{uid}:extra", S("s"))])
     rows.append([btn("🔙 صفحه اول", f"p:home:{uid}", S("p")),
                  btn("❌ بستن", f"p:close:{uid}", S("d"))])
     return InlineKeyboardMarkup(rows)
@@ -217,7 +234,7 @@ def get_live_keyboard(uid, state):
     s = (state or {}).get("settings", {})
     def sw(key, label):
         on = bool(s.get(key))
-        return [btn(("✅ " if on else "☐ ") + label, f"p:tg:{uid}:{key}:live", style_on(on))]
+        return [[btn(("✅ " if on else "☐ ") + label, f"p:tg:{uid}:{key}:live", style_on(on))]]
     rows = (sw("always_online", "🌐 همیشه آنلاین") +
             sw("tag_logger", "👂 شنود تگ") +
             sw("anti_login", "🛡️ انتی‌لاگین") +
@@ -235,7 +252,7 @@ def get_actions_keyboard(uid, state):
     a = (state or {}).get("settings", {}).get("actions", {})
     def sw(ck, label):
         on = bool(a.get(ck))
-        return [btn(("✅ " if on else "☐ ") + label, f"p:tg:{uid}:{ck}:actions", style_on(on))]
+        return [[btn(("✅ " if on else "☐ ") + label, f"p:tg:{uid}:{ck}:actions", style_on(on))]]
     return InlineKeyboardMarkup(
         sw("typing", "⌨️ تایپ") + sw("upload_photo", "📤 آپلود عکس") +
         sw("record_audio", "🎙 ضبط ویس") + sw("playing", "🎮 بازی") +
@@ -247,7 +264,7 @@ def get_formats_keyboard(uid, state):
     fm = (state or {}).get("settings", {}).get("formats", {})
     def sw(pk, label, ck):
         on = bool(fm.get(pk))
-        return [btn(("✅ " if on else "☐ ") + label, f"p:tg:{uid}:{ck}:formats", style_on(on))]
+        return [[btn(("✅ " if on else "☐ ") + label, f"p:tg:{uid}:{ck}:formats", style_on(on))]]
     return InlineKeyboardMarkup(
         sw("بولد", "🅱 بولد", "bold") + sw("ایتالیک", "🅸 ایتالیک", "italic") +
         sw("زیر خط", "🅄 زیر خط", "underline") + sw("خط‌ خورده", "🅂 خط‌خورده", "strike") +
@@ -260,7 +277,7 @@ def get_locks_keyboard(uid, state):
     lk = (state or {}).get("settings", {}).get("locks", {})
     def sw(pk, label, ck):
         on = bool(lk.get(pk))
-        return [btn(("🔒 " if on else "🔓 ") + label, f"p:tg:{uid}:{ck}:locks", style_on(on))]
+        return [[btn(("🔒 " if on else "🔓 ") + label, f"p:tg:{uid}:{ck}:locks", style_on(on))]]
     return InlineKeyboardMarkup(
         sw("همه", "همه", "lock_all") + sw("مدیا", "مدیا", "lock_media") +
         sw("استیکر", "استیکر", "lock_sticker") + sw("فوروارد", "فوروارد", "lock_forward") +
@@ -455,8 +472,7 @@ CAT_TEXTS = {
 <code>فرمت خط‌خورده روشن</code> / <code>فرمت خط‌خورده خاموش</code>
 <code>فرمت اسپویلر روشن</code> / <code>فرمت اسپویلر خاموش</code>
 <code>فرمت کد روشن</code> / <code>فرمت کد خاموش</code>
-<code>فرمت وضعیت</code> / <code>فرمت ریست</code>
-<code>منوی متن</code> — منوی شیشه‌ای سریع""",
+<code>فرمت وضعیت</code> / <code>فرمت ریست</code>""",
 
 "lock": """🔒 <b>قفل پیوی</b>
 
@@ -475,8 +491,7 @@ CAT_TEXTS = {
 <b>دستورات قابل کپی:</b>
 <code>آنلاین روشن</code> / <code>آنلاین خاموش</code>
 <code>انتی لاگین روشن</code> / <code>انتی لاگین خاموش</code>
-<code>شنود روشن</code> / <code>شنود خاموش</code> — اطلاع تگ شدن
-<code>منوی تنظیمات</code> — منوی شیشه‌ای سریع""",
+<code>شنود روشن</code> / <code>شنود خاموش</code> — اطلاع تگ شدن""",
 
 "edit": """✏️ <b>ویرایش سریع</b>
 
@@ -485,15 +500,80 @@ CAT_TEXTS = {
 
 مثال: <code>ویرایش سلان به سلام</code>""",
 
-"extra": """✨ <b>منوهای شیشه‌ای (Glass)</b>
+"extra": """🎭 <b>اکشن‌های چت</b>
 
-<b>دستورات:</b>
-<code>منوی متن</code> — دکمه‌های تیک‌دار بولد/ایتالیک/...
-<code>منوی اکشن</code> — تایپ، آپلود عکس، ضبط ویس، بازی
-<code>منوی تنظیمات</code> — آنلاین، شنود، انتی‌لاگین
-
-با کلیک روی دکمه‌ها تیک ✅ می‌خورد و با کلیک مجدد برداشته می‌شود""",
+وقتی پیامی دریافت می‌کنید، اکشن انتخابی (تایپ، آپلود عکس، ضبط ویس، بازی) به طرف مقابل نمایش داده می‌شود.""",
 }
+
+
+# ==============================================================================
+# دکمه‌های شیشه‌ای (روشن/خاموش سریع) زیر دستورات هر بخش
+# هر مورد: (برچسب، گروه در state، کلید در state، نام اکشن)
+# ==============================================================================
+GLASS = {
+    "format": {"items": [
+        ("بولد", "formats", "بولد", "format_bold"),
+        ("ایتالیک", "formats", "ایتالیک", "format_italic"),
+        ("زیر خط", "formats", "زیر خط", "format_underline"),
+        ("خط‌خورده", "formats", "خط‌ خورده", "format_strike"),
+        ("اسپویلر", "formats", "اسپویلر", "format_spoiler"),
+        ("کد", "formats", "کد", "format_code")],
+        "reset": ("format_reset", "🟢 ریست فرمت‌ها")},
+    "lock": {"items": [
+        ("همه", "locks", "همه", "lock_all"), ("مدیا", "locks", "مدیا", "lock_media"),
+        ("استیکر", "locks", "استیکر", "lock_sticker"), ("فوروارد", "locks", "فوروارد", "lock_forward"),
+        ("ویس", "locks", "ویس", "lock_voice"), ("پیام", "locks", "پیام", "lock_text"),
+        ("فایل", "locks", "فایل", "lock_file")],
+        "reset": ("lock_reset", "🟢 ریست قفل‌ها")},
+    "protect": {"items": [
+        ("آنلاین همیشگی", None, "always_online", "toggle_online"),
+        ("شنود تگ", None, "tag_logger", "toggle_taglogger"),
+        ("انتی‌لاگین", None, "anti_login", "toggle_antilogin")]},
+    "afk": {"items": [
+        ("حالت AFK", None, "afk", "toggle_afk"),
+        ("امضای خودکار (منش)", None, "signature", "toggle_signature")]},
+    "autodel": {"items": [
+        ("حذف خودکار پیام‌ها", None, "auto_delete", "toggle_autodel")]},
+    "profile": {"items": [
+        ("ساعت در اسم", None, "time_on", "toggle_time")]},
+    "extra": {"items": [
+        ("تایپ", "actions", "typing", "action_typing"),
+        ("آپلود عکس", "actions", "upload_photo", "action_photo"),
+        ("ضبط ویس", "actions", "record_audio", "action_voice"),
+        ("بازی", "actions", "playing", "action_game")],
+        "reset": ("action_reset", "🔴 ریست اکشن‌ها")},
+}
+GLASS_HEADER = "\n\n👇 <b>روشن/خاموش سریع</b> (✅ روشن ❌ خاموش):"
+
+def _glass_on(state, group, key):
+    s = (state or {}).get("settings", {})
+    if group:
+        s = s.get(group, {})
+    return bool(s.get(key))
+
+def get_glass_keyboard(uid, cat, state):
+    cfg = GLASS[cat]
+    rows, row = [], []
+    for label, group, key, action in cfg["items"]:
+        on = _glass_on(state, group, key)
+        row.append(btn(f"{label} {'✅' if on else '❌'}", f"p:tg:{uid}:{action}:c_{cat}", style_on(on)))
+        if len(row) == 2:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    if cfg.get("reset"):
+        rows.append([btn(cfg["reset"][1], f"p:tg:{uid}:{cfg['reset'][0]}:c_{cat}", S("d"))])
+    rows.append([btn("🔙 بازگشت به پنل", f"p:back:{uid}:cats", S("p"))])
+    return InlineKeyboardMarkup(rows)
+
+def cat_view(uid, cat, state):
+    """(متن، کیبورد) صفحه یک بخش؛ اگر دکمه شیشه‌ای دارد زیر دستورات می‌آید"""
+    text = CAT_TEXTS.get(cat)
+    if text is None:
+        return None, None
+    if cat in GLASS:
+        return text + GLASS_HEADER, get_glass_keyboard(uid, cat, state)
+    return text, get_back_keyboard(uid, "cats")
 
 def build_account_text(state):
     if not state_online(state):
@@ -676,9 +756,9 @@ async def callback_query_handler(client, cq):
         return
 
     if action == "cat":
-        t = CAT_TEXTS.get(arg)
+        t, kb = cat_view(uid, arg, load_self_state())
         if t:
-            await edit_view(client, cq, t, get_back_keyboard(uid, "cats"))
+            await edit_view(client, cq, t, kb)
             await cq.answer()
         else:
             await cq.answer("این بخش آماده نیست!", show_alert=True)
@@ -698,15 +778,23 @@ async def callback_query_handler(client, cq):
         return
 
     if action == "tg":
-        key = arg
-        queue_action(uid, TOGGLE_MAP.get(key, key))
+        st0 = load_self_state()
+        owner = ((st0 or {}).get("account") or {}).get("id")
+        if owner and owner != uid:
+            await cq.answer("⛔ این پنل فقط برای صاحب سلف است", show_alert=True)
+            return
+        ts = queue_action(uid, TOGGLE_MAP.get(arg, arg))
         await cq.answer("✅ در حال اعمال روی سلف...")
-        await asyncio.sleep(1.2)
-        st = load_self_state()
-        parent = extra if extra in SUB_PAGES else "live"
-        text_fn, kb_fn = SUB_PAGES[parent]
+        st = await wait_for_action(ts) if state_online(st0) else load_self_state()
         try:
-            await edit_view(client, cq, text_fn(st), kb_fn(uid, st))
+            if extra.startswith("c_"):
+                t, kb = cat_view(uid, extra[2:], st)
+                if t:
+                    await edit_view(client, cq, t, kb)
+            else:
+                parent = extra if extra in SUB_PAGES else "live"
+                text_fn, kb_fn = SUB_PAGES[parent]
+                await edit_view(client, cq, text_fn(st), kb_fn(uid, st))
         except Exception:
             pass
         return
