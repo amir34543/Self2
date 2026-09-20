@@ -1,5 +1,5 @@
 # ==============================================================================
-#  ربات هلپر و پنل مدیریت سلف بات — PersianGulf Helper
+#  ربات هلپر و پنل مدیریت — Persian Gulf Self
 #  نسخه: 7.0.0 «شاهکار» — حساب کاربری + تنظیمات کامل سلف + بنر عکس/اسم
 # ==============================================================================
 
@@ -24,7 +24,7 @@ except ImportError:
 
 # توکن را در Railway → Variables با نام HELPER_BOT_TOKEN بگذار (پیشنهادی)
 # یا مستقیم به‌جای PUT_TOKEN_HERE بنویس
-TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis"
+TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "PUT_TOKEN_HERE"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 
@@ -83,6 +83,10 @@ def state_online(state):
 # ------------------------- بنر پنل (عکس + اسم) -------------------------
 # self.py بنر را به همین ربات (پیوی) می‌فرستد؛ هلپر file_id را ذخیره می‌کند
 # و موقع باز شدن پنل بدون هیچ آپلودی از آن استفاده می‌کند (سریع و بدون تاخیر)
+BRAND = "Persian Gulf Self"
+BRAND_FOOTER = "\n\n💎 <i>" + BRAND + "</i>"
+def brand(text): return text + BRAND_FOOTER
+
 BANNER_FID_FILE = "panel_banner_fid.json"
 _banner = {"fid": None, "owner": None, "sig": None}
 
@@ -136,6 +140,7 @@ class CachedPhotoResult:
 
 async def edit_view(client, cq, text, kb):
     """ویرایش پیام پنل؛ هم برای پیام متنی و هم برای پیام عکس‌دار (کپشن)"""
+    text = brand(text)
     try:
         if cq.inline_message_id:
             fn = getattr(client, "edit_inline_caption", None) or client.edit_inline_text
@@ -268,12 +273,12 @@ def get_locks_keyboard(uid, state):
 # ==============================================================================
 # متن صفحات
 # ==============================================================================
-MAIN_TEXT = ("🎛 <b>پنل مدیریت سلف</b>\n\n"
+MAIN_TEXT = ("🎛 <b>پنل مدیریت سلف Persian Gulf</b>\n\n"
              "👇 از دکمه‌های زیر استفاده کنید:\n"
              "• 👤 <b>حساب کاربری</b> — اطلاعات زنده اکانت شما\n"
              "• ⚙️ <b>تنظیمات سلف</b> — همه دستورات و تنظیمات")
 
-CATS_TEXT = ("🤖 <b>NitroSelf — پنل دستورات</b>\n\n"
+CATS_TEXT = ("🤖 <b>Persian Gulf Self — پنل دستورات</b>\n\n"
              "💡 روی هر بخش بزنید تا دستوراتش باز شود\n"
              "📋 دستورات را کپی کنید و در چت خودتان بفرستید")
 
@@ -499,7 +504,7 @@ def build_account_text(state):
     s = state.get("settings", {})
     name = ((acc.get("first_name") or "") + " " + (acc.get("last_name") or "")).strip() or "—"
     lines = [
-        "👤 <b>حساب کاربری سلف</b>", "",
+        "👤 <b>حساب کاربری — Persian Gulf Self</b>", "",
         f"🪪 نام: <b>{escape(name)}</b>",
         f"🔗 یوزرنیم: @{escape(acc.get('username') or 'ندارد')}",
         f"🆔 آیدی: <code>{acc.get('id', '—')}</code>",
@@ -520,7 +525,7 @@ def build_account_text(state):
 
 def settings_page_text(state):
     if state_online(state):
-        head = "⚡ <b>تنظیمات زنده سلف</b>\n<i>روی دکمه‌ها بزنید تا فوراً روی اکانت اعمال شود</i>"
+        head = "⚡ <b>تنظیمات زنده Persian Gulf Self</b>\n<i>روی دکمه‌ها بزنید تا فوراً روی اکانت اعمال شود</i>"
     else:
         head = "⚠️ <b>سلف آفلاین است</b>\n<i>دستورات در صف می‌مانند و با روشن شدن سلف اعمال می‌شوند</i>"
     s = (state or {}).get("settings", {})
@@ -574,7 +579,7 @@ SUB_PAGES = {
 # ==============================================================================
 @app.on_message(filters.command("start") & filters.private)
 async def show_menu(client, message):
-    await message.reply_text(MAIN_TEXT, reply_markup=get_main_keyboard(message.from_user.id),
+    await message.reply_text(brand(MAIN_TEXT), reply_markup=get_main_keyboard(message.from_user.id),
                              parse_mode=enums.ParseMode.HTML)
 
 @app.on_message(filters.private & filters.photo)
@@ -600,15 +605,15 @@ async def inline_query_handler(client, inline_query):
     uid = inline_query.from_user.id
     if q == "panel":
         article = InlineQueryResultArticle(
-            id="1", title="🎛 پنل مدیریت سلف",
+            id="1", title="🎛 پنل مدیریت Persian Gulf Self",
             description="حساب کاربری + تنظیمات کامل سلف",
-            input_message_content=InputTextMessageContent(MAIN_TEXT, parse_mode=enums.ParseMode.HTML),
+            input_message_content=InputTextMessageContent(brand(MAIN_TEXT), parse_mode=enums.ParseMode.HTML),
             reply_markup=get_main_keyboard(uid))
         fid = _banner["fid"] if _banner.get("owner") == uid else None
         if fid:
             try:
                 await inline_query.answer(
-                    [CachedPhotoResult("1", fid, MAIN_TEXT, get_main_keyboard(uid))],
+                    [CachedPhotoResult("1", fid, brand(MAIN_TEXT), get_main_keyboard(uid))],
                     cache_time=5, is_personal=True)
                 return
             except Exception as e:
@@ -618,9 +623,9 @@ async def inline_query_handler(client, inline_query):
         await inline_query.answer([article], cache_time=5, is_personal=True)
     elif q == "settings":
         results = [InlineQueryResultArticle(
-            id="2", title="⚙️ تنظیمات سلف — پنل دستورات",
+            id="2", title="⚙️ Persian Gulf Self — پنل دستورات",
             description="همه بخش‌ها و دستورات سلف",
-            input_message_content=InputTextMessageContent(CATS_TEXT, parse_mode=enums.ParseMode.HTML),
+            input_message_content=InputTextMessageContent(brand(CATS_TEXT), parse_mode=enums.ParseMode.HTML),
             reply_markup=get_categories_keyboard(uid))]
         await inline_query.answer(results, cache_time=5, is_personal=True)
     else:
@@ -709,5 +714,5 @@ async def callback_query_handler(client, cq):
     await cq.answer("داده نامعتبر!", show_alert=True)
 
 if __name__ == "__main__":
-    print("🤖 ربات هلپر (Pyrogram) اجرا شد — پنل شاهکار v7.0")
+    print("🤖 ربات هلپر Persian Gulf Self (Pyrogram) اجرا شد — پنل شاهکار v7.0")
     app.run()
