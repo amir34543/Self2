@@ -206,7 +206,7 @@ CMD_STARTERS = ("بایو", "یوزر", "نام", "ترجمه", "آب", "بار�
 # ==============================================================================
 @app.on_message(filters.me & filters.command(["پنل", "panel"], prefixes=""))
 async def panel_command(client, message):
-    loading_msg = await message.edit_text("⏳ **در حال باز کردن پنل...**")
+    loading_msg = await message.edit_text("⏳ **در حال باز کردن پنل Persian Gulf Self...**")
     try:
         results = await client.get_inline_bot_results(bot_username, "panel")
         if results and results.results:
@@ -1336,18 +1336,19 @@ async def apply_actions_group(client, message): await apply_chat_actions(client,
 # ★ ساخت بنر پنل (عکس پروفایل + اسم) با Pillow ★
 # ==============================================================================
 PANEL_BANNER_FILE = "panel_banner.png"      # خروجی؛ هلپر همین فایل را می‌خواند
-PANEL_TEMPLATE_FILE = "panel_template.png"  # اختیاری: بنر دلخواه خودت (اگر نبود، بنر پیش‌فرض ساخته می‌شود)
+PANEL_TEMPLATE_FILE = "panel_template.jpg"  # پس‌زمینه بنر (اگر نبود، بنر پیش‌فرض ساخته می‌شود)
 PANEL_FONT_CANDIDATES = [
-    "Vazirmatn-Bold.ttf", "Vazirmatn.ttf", "Vazir-Bold.ttf", "Vazir.ttf",
+    "panel_font.ttf", "Vazirmatn-Bold.ttf", "Vazirmatn.ttf", "Vazir-Bold.ttf", "Vazir.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
 ]
 # موقعیت‌ها به‌صورت نسبت از عرض/ارتفاع بنر (از روی عکسی که فرستادی)
-PANEL_AVATAR_CENTER = (0.823, 0.374)   # مرکز دایره عکس
-PANEL_AVATAR_RADIUS = 0.102            # شعاع دایره (نسبت به عرض)
-PANEL_NAME_CENTER = (0.79, 0.75)       # مرکز کپسول اسم
-PANEL_NAME_BOX_W = 0.272               # عرض کپسول اسم (نسبت به عرض)
-PANEL_ACCENT = (255, 122, 26)          # رنگ نارنجی قاب‌ها
+PANEL_AVATAR_CENTER = (0.883, 0.282)   # مرکز دایره عکس
+PANEL_AVATAR_RADIUS = 0.0733           # شعاع دایره (نسبت به عرض)
+PANEL_NAME_CENTER = (0.883, 0.516)      # مرکز کپسول اسم
+PANEL_NAME_BOX_W = 0.217               # عرض کپسول اسم (نسبت به عرض)
+PANEL_NAME_BOX_H = 0.09               # ارتفاع کپسول اسم (نسبت به ارتفاع)
+PANEL_ACCENT = (255, 205, 90)          # رنگ طلایی قاب‌ها
 
 def _panel_font(size):
     from PIL import ImageFont
@@ -1356,6 +1357,12 @@ def _panel_font(size):
         except Exception: continue
     try: return ImageFont.load_default(size=size)
     except Exception: return ImageFont.load_default()
+
+def _panel_clean_name(name):
+    """ساعت داخل اسم (مثل 𝟏𝟐:𝟑𝟒) را حذف می‌کند؛ فونت‌ها این ارقام را ندارند"""
+    import re as _re
+    name = _re.sub(r"[\s\u0334]*(?:\d[\u0334]*){1,2}[\u0334]*:[\u0334]*(?:\d[\u0334]*){1,2}[\s\u0334]*", " ", name or "")
+    return _re.sub(r"\s+", " ", name).strip()
 
 def _panel_shape_text(text):
     """درست‌کردن حروف چسبیده و راست‌به‌چپ برای اسم فارسی"""
@@ -1375,8 +1382,8 @@ def _panel_default_template(w=1200, h=520):
         d.line([(0, y), (w, y)], fill=(int(14 + 22 * k), int(14 + 10 * k), int(18 + 6 * k)))
     d.ellipse([-200, h - 260, 500, h + 300], fill=(60, 28, 8))
     f1, f2 = _panel_font(150), _panel_font(60)
-    d.text((70, 70), "SELF", font=f1, fill=PANEL_ACCENT)
-    d.text((76, 260), "PANEL", font=f2, fill=(235, 235, 235))
+    d.text((70, 60), "PERSIAN GULF", font=_panel_font(110), fill=PANEL_ACCENT)
+    d.text((76, 230), "S E L F", font=f2, fill=(235, 235, 235))
     return img
 
 def make_panel_banner(avatar_path, name, out_path=PANEL_BANNER_FILE, template_path=PANEL_TEMPLATE_FILE):
@@ -1409,10 +1416,10 @@ def make_panel_banner(avatar_path, name, out_path=PANEL_BANNER_FILE, template_pa
     layer.paste(av, (int(cx - r), int(cy - r)), mask)
 
     # --- کپسول اسم ---
-    bw, bh = PANEL_NAME_BOX_W * W * ss, 0.15 * H * ss
+    bw, bh = PANEL_NAME_BOX_W * W * ss, PANEL_NAME_BOX_H * H * ss
     nx, ny = PANEL_NAME_CENTER[0] * W * ss, PANEL_NAME_CENTER[1] * H * ss
     d.rounded_rectangle([nx - bw / 2, ny - bh / 2, nx + bw / 2, ny + bh / 2], radius=bh / 2,
-                        fill=(20, 16, 12, 235), outline=PANEL_ACCENT + (255,), width=3 * ss)
+                        fill=(8, 12, 26, 225), outline=PANEL_ACCENT + (255,), width=3 * ss)
     txt = _panel_shape_text((name or "").strip() or "Self")
     fs = int(bh * 0.62)
     ft = _panel_font(fs)
@@ -1467,6 +1474,7 @@ async def refresh_panel_banner():
         name = (me.first_name or "").strip()
         if user_time_status.get(me.id) and user_original_names.get(me.id):
             name = user_original_names[me.id].strip()   # اسم بدون ساعت
+        name = _panel_clean_name(name)
         ph = me.photo
         pid = None
         if ph:
@@ -1489,7 +1497,7 @@ async def refresh_panel_banner():
     except Exception as e:
         _panel_banner_backoff = time.time() + 60
         import traceback
-        print("⚠️ ساخت بنر پنل ناموفق بود [r6]:", repr(e))
+        print("⚠️ ساخت بنر پنل ناموفق بود [r7]:", repr(e))
         print(traceback.format_exc())
     finally:
         _panel_banner_busy = False
@@ -1647,15 +1655,15 @@ async def banner_loop():
         await asyncio.sleep(20)
 
 if __name__ == "__main__":
-    print("🧩 نسخه فایل: self.py | build panel-banner-r6 | ", os.path.abspath(__file__))
-    if USER_ID: print(f"✅ سلف‌بات برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
+    print("🧩 Persian Gulf Self | build panel-banner-r7 |", os.path.abspath(__file__))
+    if USER_ID: print(f"✅ Persian Gulf Self برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
     else: print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
     if not USER_ID and not os.path.exists("self.session"):
         print("❌ بدون آرگومان و بدون فایل self.session اجرا شد؛ این پروسه لازم نیست (سلف‌بات را هلپر اجرا می‌کند). خروج.")
         sys.exit(0)
     loop = asyncio.get_event_loop()
     app.start()
-    print("🔗 سیستم پنل شاهکار فعال شد")
+    print("🔗 سیستم پنل Persian Gulf Self فعال شد")
     try:
         loop.run_until_complete(asyncio.gather(
             panel_state_loop(), panel_actions_loop(),
