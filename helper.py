@@ -223,9 +223,54 @@ def get_categories_keyboard(uid):
         pair = c[i:i+2]
         rows.append([btn(t, f"p:cat:{uid}:{k}", S("p")) for t, k in pair])
     rows.append([btn("🎭 اکشن‌های چت", f"p:cat:{uid}:extra", S("s"))])
-    rows.append([btn("🔙 صفحه اول", f"p:home:{uid}", S("p")),
-                 btn("❌ بستن", f"p:close:{uid}", S("d"))])
+    rows += nav_rows(uid, 1)
     return InlineKeyboardMarkup(rows)
+
+
+# ==============================================================================
+# صفحه‌بندی پنل: صفحه ۱ (دسته‌های اصلی) / صفحه ۲ / صفحه ۳ (قابلیت‌های تازه)
+# ==============================================================================
+PAGE_NAMES = {1: "صفحه اول", 2: "صفحه دوم", 3: "صفحه سوم"}
+
+def nav_rows(uid, page):
+    """ردیف صفحه‌ها: [◀ قبلی] [• فعلی •] [بعدی ▶] و زیرش خانه/بستن پنل"""
+    row = []
+    if page > 1:
+        row.append(btn(f"◀ {PAGE_NAMES[page - 1]}", f"p:pg:{uid}:{page - 1}", S("p")))
+    row.append(btn(f"• {PAGE_NAMES[page]} •", f"p:pg:{uid}:{page}", S("s")))
+    if page < 3:
+        row.append(btn(f"{PAGE_NAMES[page + 1]} ▶", f"p:pg:{uid}:{page + 1}", S("p")))
+    return [row, [btn("🏠 خانه", f"p:home:{uid}", S("p")), btn("❌ بستن پنل", f"p:close:{uid}", S("d"))]]
+
+# چیدمان صفحه ۲ و ۳ مثل پنل مرجع: ردیف‌های دوتایی و تکی به‌صورت یک‌درمیان
+PAGE_GRIDS = {
+    2: [[("🔍 سرچ", "search"), ("🎲 تقلب", "cheat")],
+        [("📸 اسکرین", "screenshot")],
+        [("💬 کامنت اول", "firstcomment"), ("🚫 فیلتر کلمات", "wfilter")],
+        [("📌 عضویت اجباری پیوی", "forcejoin")],
+        [("📰 منشی", "secretary"), ("🏷 تگ", "tagall")],
+        [("🗑 حذف", "delete"), ("ℹ️ اطلاعات", "info")],
+        [("🤝 دوست", "friend"), ("📝 میمو", "memo")]],
+    3: [[("🕵️ کپی پروفایل", "copyprofile"), ("🛡 نگهبان چت", "guard")],
+        [("🎨 لوگو", "logo")],
+        [("📝 محتوا", "content"), ("👁 سین خودکار", "autoseen")],
+        [("🎬 انیمیشن", "anim")],
+        [("⭐ استارزی", "stars"), ("💎 موجودی", "balance")],
+        [("😍 ایموجی پریمیوم", "premoji"), ("🎥 ساخت ویدیو گرد", "roundvid")]],
+}
+# هر بخش به کدام صفحه برمی‌گردد (پیش‌فرض: صفحه ۱)
+CAT_PAGE = {k: pg for pg, grid in PAGE_GRIDS.items() for row in grid for _, k in row}
+
+def get_page_keyboard(uid, page):
+    if page == 1:
+        return get_categories_keyboard(uid)
+    rows = [[btn(t, f"p:cat:{uid}:{k}", S("p")) for t, k in row] for row in PAGE_GRIDS[page]]
+    rows += nav_rows(uid, page)
+    return InlineKeyboardMarkup(rows)
+
+def page_view(uid, page):
+    text = {1: CATS_TEXT, 2: PAGE2_TEXT, 3: PAGE3_TEXT}[page]
+    return text, get_page_keyboard(uid, page)
 
 def get_back_keyboard(uid, target="cats"):
     return InlineKeyboardMarkup([[btn("🔙 بازگشت", f"p:back:{uid}:{target}", S("p"))]])
@@ -297,7 +342,16 @@ MAIN_TEXT = ("🎛 <b>پنل مدیریت سلف Persian Gulf</b>\n\n"
 
 CATS_TEXT = ("🤖 <b>Persian Gulf Self — پنل دستورات</b>\n\n"
              "💡 روی هر بخش بزنید تا دستوراتش باز شود\n"
-             "📋 دستورات را کپی کنید و در چت خودتان بفرستید")
+             "📋 دستورات را کپی کنید و در چت خودتان بفرستید\n"
+             "📄 <b>صفحه اول از ۳</b>")
+
+PAGE2_TEXT = ("🤖 <b>Persian Gulf Self — قابلیت‌های تازه</b>\n\n"
+              "💡 روی هر بخش بزنید تا دستوراتش باز شود\n"
+              "📄 <b>صفحه دوم از ۳</b>")
+
+PAGE3_TEXT = ("🤖 <b>Persian Gulf Self — قابلیت‌های تازه</b>\n\n"
+              "💡 روی هر بخش بزنید تا دستوراتش باز شود\n"
+              "📄 <b>صفحه سوم از ۳</b>")
 
 CAT_TEXTS = {
 "profile": """🪄 <b>مدیریت پروفایل</b>
@@ -506,6 +560,175 @@ CAT_TEXTS = {
 }
 
 
+CAT_TEXTS.update({
+"search": """🔍 <b>سرچ</b>
+
+<b>دستور قابل کپی:</b>
+<code>سرچ عبارت</code> — جستجو در ویکی‌پدیا (فارسی، سپس انگلیسی) و ارسال خلاصه + لینک
+
+مثال: <code>سرچ خلیج فارس</code>""",
+
+"cheat": """🎲 <b>تقلب در بازی‌ها</b>
+
+<b>دستورات قابل کپی:</b>
+<code>تقلب تاس 6</code>
+<code>تقلب دارت 6</code>
+<code>تقلب بولینگ 6</code>
+<code>تقلب بسکتبال 5</code>
+<code>تقلب فوتبال 5</code>
+<code>تقلب اسلات 64</code>
+
+آنقدر ایموجی بازی می‌فرستد تا عدد دلخواه بیاید (حداکثر ۴۰ تلاش) و بقیه پاک می‌شوند""",
+
+"screenshot": """📸 <b>اسکرین</b>
+
+<b>دستور قابل کپی:</b>
+<code>اسکرین example.com</code> — گرفتن اسکرین‌شات از یک سایت و ارسال عکس آن""",
+
+"firstcomment": """💬 <b>کامنت اول</b>
+
+<b>دستورات قابل کپی:</b>
+<code>کامنت اول متن سلام، عالی بود</code> — متن کامنت
+<code>کامنت اول افزودن @channel</code> — کانال هدف
+<code>کامنت اول حذف @channel</code>
+<code>کامنت اول لیست</code>
+<code>کامنت اول روشن</code> / <code>کامنت اول خاموش</code>
+
+با هر پست جدید کانال‌های لیست، اولین کامنت را می‌گذارد (باید عضو کانال باشید)""",
+
+"wfilter": """🚫 <b>فیلتر کلمات</b>
+
+<b>دستورات قابل کپی:</b>
+<code>فیلتر افزودن کلمه</code>
+<code>فیلتر حذف کلمه</code>
+<code>فیلتر لیست</code> / <code>فیلتر پاکسازی</code>
+<code>فیلتر روشن</code> / <code>فیلتر خاموش</code>
+
+پیام‌های دریافتی که شامل این کلمات باشند حذف می‌شوند (در گروه‌ها نیاز به ادمین بودن)""",
+
+"forcejoin": """📌 <b>عضویت اجباری پیوی</b>
+
+<b>دستورات قابل کپی:</b>
+<code>عضویت اجباری کانال @channel</code>
+<code>عضویت اجباری روشن</code> / <code>عضویت اجباری خاموش</code>
+
+کسی که عضو کانال نباشد و در پیوی به شما پیام بدهد، پیامش حذف می‌شود و اعلان عضویت می‌گیرد (مخاطبین معاف‌اند)
+⚠️ حساب شما باید ادمین آن کانال باشد""",
+
+"secretary": """📰 <b>منشی</b>
+
+<b>دستورات قابل کپی:</b>
+<code>منشی متن سلام، بعداً پاسخ می‌دهم</code>
+<code>منشی وضعیت</code>
+<code>منشی روشن</code> / <code>منشی خاموش</code>
+
+به اولین پیام هر نفر در پیوی پاسخ می‌دهد (هر ۶ ساعت یک‌بار برای هر نفر)""",
+
+"tagall": """🏷 <b>تگ</b>
+
+<b>دستورات قابل کپی:</b>
+<code>تگ</code> — تگ اعضای گروه
+<code>تگ متن دلخواه</code> — تگ با متن
+
+حداکثر ۱۰۰ عضو، هر ۵ نفر در یک پیام (فقط داخل گروه)""",
+
+"delete": """🗑 <b>حذف</b>
+
+<b>دستورات قابل کپی:</b>
+<code>حذف</code> — ریپلای روی یک پیام: همان پیام حذف می‌شود
+<code>حذف پیام 20</code> — حذف ۲۰ پیام آخر خودتان
+<code>حذف زمان‌دار 10</code> — حذف بعد از ۱۰ ثانیه""",
+
+"info": """ℹ️ <b>اطلاعات</b>
+
+<b>دستور قابل کپی:</b>
+<code>اطلاعات</code> — اطلاعات خودتان یا کاربری که روی پیامش ریپلای کرده‌اید (همان دستور <code>ایدی</code>)""",
+
+"friend": """🤝 <b>دوست</b>
+
+<b>دستورات قابل کپی:</b>
+<code>دوست</code> — افزودن (ریپلای)
+<code>حذف دوست</code> (ریپلای)
+<code>لیست دوست</code> / <code>دوستان</code>
+<code>پاک کردن دوستان</code>
+
+به پیام‌های دوستان ❤️ ریاکشن می‌دهد و گاهی جمله محبت‌آمیز می‌فرستد""",
+
+"memo": """📝 <b>میمو</b>
+
+<b>دستورات قابل کپی:</b>
+<code>میمو متن یادداشت</code>
+<code>میمو ها</code> — لیست
+<code>میمو حذف شماره</code>
+
+(همان یادداشت‌ها؛ هر دو نام کار می‌کنند)""",
+
+"copyprofile": """🕵️ <b>کپی پروفایل</b>
+
+<b>دستورات قابل کپی:</b>
+<code>کپی پروفایل</code> — ریپلای روی پیام کاربر
+<code>کپی پروفایل @user</code>
+<code>بازگردانی پروفایل</code> — برگشت به پروفایل اصلی
+
+نام، بیو و عکس کاربر را کپی می‌کند (پروفایل اصلی شما اول پشتیبان‌گیری می‌شود)""",
+
+"guard": """🛡 <b>نگهبان چت</b>
+
+<b>دستورات قابل کپی (داخل گروه):</b>
+<code>نگهبان روشن</code> / <code>نگهبان خاموش</code>
+<code>نگهبان لینک روشن</code> / <code>نگهبان لینک خاموش</code>
+<code>نگهبان وضعیت</code>
+
+پیام‌های اسپم/فلود (و لینک‌ها، اگر روشن باشد) از غیر ادمین‌ها حذف می‌شود
+⚠️ باید در گروه ادمین باشید""",
+
+"logo": """🎨 <b>لوگو</b>
+
+<b>دستور قابل کپی:</b>
+<code>لوگو Persian Gulf</code> — ساخت لوگوی طلایی از متن و ارسال به‌صورت عکس""",
+
+"content": """📝 <b>محتوا</b>
+
+<b>دستور قابل کپی:</b>
+<code>محتوا</code> — ریپلای روی یک پیام: نوع، ابعاد، حجم، مدت و... را نشان می‌دهد""",
+
+"autoseen": """👁 <b>سین خودکار</b>
+
+<b>دستورات قابل کپی:</b>
+<code>سین خودکار روشن</code> / <code>سین خودکار خاموش</code>
+
+پیام‌های دریافتی خودکار «خوانده‌شده» می‌شوند""",
+
+"anim": """🎬 <b>انیمیشن</b>
+
+<b>دستورات قابل کپی:</b>
+<code>انیمیشن متن دلخواه</code> — تایپ‌شونده
+<code>انیمیشن ماه</code> / <code>قلب</code> / <code>ساعت</code> / <code>موج</code> / <code>آتش</code>""",
+
+"stars": """⭐ <b>استارزی</b>
+
+<b>دستور قابل کپی:</b>
+<code>استارزی</code> — موجودی استارز تلگرام شما""",
+
+"balance": """💎 <b>موجودی</b>
+
+<b>دستور قابل کپی:</b>
+<code>موجودی</code> — موجودی استارز و تون (TON) اکانت""",
+
+"premoji": """😍 <b>ایموجی پریمیوم</b>
+
+<b>دستورات قابل کپی:</b>
+<code>ایموجی پریمیوم سلام ❤️🔥</code>
+<code>ایموجی پریمیوم</code> — ریپلای روی یک پیام
+
+ایموجی‌های متن را به ایموجی پریمیوم تبدیل می‌کند (فقط با اکانت پریمیوم)""",
+
+"roundvid": """🎥 <b>ساخت ویدیو گرد</b>
+
+<b>دستور قابل کپی:</b>
+<code>ساخت ویدیو گرد</code> — ریپلای روی یک ویدیو یا گیف؛ به ویدیو گرد تلگرام تبدیل می‌شود (حداکثر ۶۰ ثانیه)""",
+})
+
 # ==============================================================================
 # دکمه‌های شیشه‌ای (روشن/خاموش سریع) زیر دستورات هر بخش
 # هر مورد: (برچسب، گروه در state، کلید در state، نام اکشن)
@@ -536,6 +759,13 @@ GLASS = {
         ("حذف خودکار پیام‌ها", None, "auto_delete", "toggle_autodel")]},
     "profile": {"items": [
         ("ساعت در اسم", None, "time_on", "toggle_time")]},
+    "firstcomment": {"items": [("کامنت اول", None, "firstcomment_on", "toggle_firstcomment")]},
+    "wfilter": {"items": [("فیلتر کلمات", None, "filter_on", "toggle_filter")]},
+    "forcejoin": {"items": [("عضویت اجباری", None, "forcejoin_on", "toggle_forcejoin")]},
+    "secretary": {"items": [("منشی", None, "secretary_on", "toggle_secretary")]},
+    "guard": {"items": [("نگهبان چت", None, "guard_on", "toggle_guard"),
+                        ("حذف لینک", None, "guard_links", "toggle_guardlinks")]},
+    "autoseen": {"items": [("سین خودکار", None, "seen_on", "toggle_seen")]},
     "extra": {"items": [
         ("تایپ", "actions", "typing", "action_typing"),
         ("آپلود عکس", "actions", "upload_photo", "action_photo"),
@@ -563,7 +793,7 @@ def get_glass_keyboard(uid, cat, state):
         rows.append(row)
     if cfg.get("reset"):
         rows.append([btn(cfg["reset"][1], f"p:tg:{uid}:{cfg['reset'][0]}:c_{cat}", S("d"))])
-    rows.append([btn("🔙 بازگشت به پنل", f"p:back:{uid}:cats", S("p"))])
+    rows.append([btn("🔙 بازگشت به پنل", f"p:pg:{uid}:{CAT_PAGE.get(cat, 1)}", S("p"))])
     return InlineKeyboardMarkup(rows)
 
 def cat_view(uid, cat, state):
@@ -573,7 +803,7 @@ def cat_view(uid, cat, state):
         return None, None
     if cat in GLASS:
         return text + GLASS_HEADER, get_glass_keyboard(uid, cat, state)
-    return text, get_back_keyboard(uid, "cats")
+    return text, InlineKeyboardMarkup([[btn("🔙 بازگشت", f"p:pg:{uid}:{CAT_PAGE.get(cat, 1)}", S("p"))]])
 
 def build_account_text(state):
     if not state_online(state):
@@ -750,8 +980,12 @@ async def callback_query_handler(client, cq):
         await cq.answer()
         return
 
-    if action == "cats":
-        await edit_view(client, cq, CATS_TEXT, get_categories_keyboard(uid))
+    if action in ("cats", "pg"):
+        page = 1
+        if action == "pg" and arg.isdigit() and 1 <= int(arg) <= 3:
+            page = int(arg)
+        text, kb = page_view(uid, page)
+        await edit_view(client, cq, text, kb)
         await cq.answer()
         return
 
