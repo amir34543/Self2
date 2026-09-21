@@ -256,7 +256,8 @@ PAGE_GRIDS = {
         [("📝 محتوا", "content"), ("👁 سین خودکار", "autoseen")],
         [("🎬 انیمیشن", "anim")],
         [("⭐ استارزی", "stars"), ("💎 موجودی", "balance")],
-        [("😍 ایموجی پریمیوم", "premoji"), ("🎥 ساخت ویدیو گرد", "roundvid")]],
+        [("😍 ایموجی پریمیوم", "premoji"), ("🎥 ساخت ویدیو گرد", "roundvid")],
+        [("⏳ ذخیره تایمدار", "timedsave")]],
 }
 # هر بخش به کدام صفحه برمی‌گردد (پیش‌فرض: صفحه ۱)
 CAT_PAGE = {k: pg for pg, grid in PAGE_GRIDS.items() for row in grid for _, k in row}
@@ -603,8 +604,10 @@ CAT_TEXTS.update({
 <code>فیلتر حذف کلمه</code>
 <code>فیلتر لیست</code> / <code>فیلتر پاکسازی</code>
 <code>فیلتر روشن</code> / <code>فیلتر خاموش</code>
+<code>فیلتر پیوی روشن</code> / <code>فیلتر پیوی خاموش</code>
+<code>فیلتر گروه روشن</code> / <code>فیلتر گروه خاموش</code>
 
-پیام‌های دریافتی که شامل این کلمات باشند حذف می‌شوند (در گروه‌ها نیاز به ادمین بودن)""",
+پیام‌های دریافتی شامل این کلمات در <b>پیوی</b> (حذف دو طرفه) و <b>گروه‌ها</b> (نیاز به دسترسی حذف) پاک می‌شوند؛ پیام ویرایش‌شده هم بررسی می‌شود""",
 
 "forcejoin": """📌 <b>عضویت اجباری پیوی</b>
 
@@ -674,13 +677,15 @@ CAT_TEXTS.update({
 
 "guard": """🛡 <b>نگهبان چت</b>
 
-<b>دستورات قابل کپی (داخل گروه):</b>
-<code>نگهبان روشن</code> / <code>نگهبان خاموش</code>
+<b>دستورات قابل کپی:</b>
+<code>نگهبان روشن</code> / <code>نگهبان خاموش</code> — داخل گروه
+<code>نگهبان پیوی روشن</code> / <code>نگهبان پیوی خاموش</code>
 <code>نگهبان لینک روشن</code> / <code>نگهبان لینک خاموش</code>
 <code>نگهبان وضعیت</code>
 
-پیام‌های اسپم/فلود (و لینک‌ها، اگر روشن باشد) از غیر ادمین‌ها حذف می‌شود
-⚠️ باید در گروه ادمین باشید""",
+اسپم/فلود و (در صورت روشن بودن) لینک حذف می‌شود:
+• در <b>گروه</b> از غیر ادمین‌ها (باید ادمین باشید)
+• در <b>پیوی</b> از غیرمخاطبین، با حذف دو طرفه""",
 
 "logo": """🎨 <b>لوگو</b>
 
@@ -723,6 +728,16 @@ CAT_TEXTS.update({
 
 ایموجی‌های متن را به ایموجی پریمیوم تبدیل می‌کند (فقط با اکانت پریمیوم)""",
 
+"timedsave": """⏳ <b>ذخیره تایمدار</b>
+
+<b>دستورات قابل کپی:</b>
+<code>ذخیره تایمدار</code> — ریپلای روی عکس/ویدیو/ویس تایمدار
+<code>ذخیره تایمدار روشن</code> / <code>ذخیره تایمدار خاموش</code> — ذخیره خودکار
+<code>ذخیره تایمدار وضعیت</code>
+
+عکس، ویدیو، ویس و ویدیو گرد تایمدار (خودتخریب‌شونده) به‌محض رسیدن در پیام‌های ذخیره‌شده ذخیره می‌شود
+⚠️ بعد از باز شدن توسط شما، مدیا از تلگرام حذف می‌شود؛ پس حالت خودکار روشن بماند""",
+
 "roundvid": """🎥 <b>ساخت ویدیو گرد</b>
 
 <b>دستور قابل کپی:</b>
@@ -760,11 +775,15 @@ GLASS = {
     "profile": {"items": [
         ("ساعت در اسم", None, "time_on", "toggle_time")]},
     "firstcomment": {"items": [("کامنت اول", None, "firstcomment_on", "toggle_firstcomment")]},
-    "wfilter": {"items": [("فیلتر کلمات", None, "filter_on", "toggle_filter")]},
+    "wfilter": {"items": [("فیلتر کلمات", None, "filter_on", "toggle_filter"),
+                          ("پیوی", None, "filter_pv", "toggle_filterpv"),
+                          ("گروه", None, "filter_groups", "toggle_filtergroups")]},
     "forcejoin": {"items": [("عضویت اجباری", None, "forcejoin_on", "toggle_forcejoin")]},
     "secretary": {"items": [("منشی", None, "secretary_on", "toggle_secretary")]},
-    "guard": {"items": [("نگهبان چت", None, "guard_on", "toggle_guard"),
+    "guard": {"items": [("نگهبان گروه", None, "guard_on", "toggle_guard"),
+                        ("نگهبان پیوی", None, "guard_pv", "toggle_guardpv"),
                         ("حذف لینک", None, "guard_links", "toggle_guardlinks")]},
+    "timedsave": {"items": [("ذخیره تایمدار", None, "timed_save_on", "toggle_timedsave")]},
     "autoseen": {"items": [("سین خودکار", None, "seen_on", "toggle_seen")]},
     "extra": {"items": [
         ("تایپ", "actions", "typing", "action_typing"),
