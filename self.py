@@ -13,7 +13,7 @@ from datetime import datetime
 import pytz
 from pyrogram import enums
 from pyrogram.raw import functions as rawfn
-from pyrogram.errors import FloodWait
+from pyrogram.errors import FloodWait, UserNotParticipant
 
 bot_username = "Helperbotpersian_bot"  # یوزرنیم ربات هلپر بدون @
 
@@ -400,7 +400,7 @@ async def del_all_photos(client, message):
     except Exception as e:
         await m.edit(f"❌ `{e}`")
 
-@app.on_message(filters.me & filters.command("بایو", prefixes=""))
+@app.on_message(filters.me & filters.command(["بایو", "بیو"], prefixes=""))
 async def set_bio(client, message):
     if len(message.command) < 2: return await message.edit("❌ `بایو متن`")
     try:
@@ -416,7 +416,7 @@ async def set_username(client, message):
         await message.edit("✅ یوزر تغییر کرد")
     except Exception as e: await message.edit(f"❌ `{e}`")
 
-@app.on_message(filters.me & filters.command("نام", prefixes=""))
+@app.on_message(filters.me & filters.command(["نام", "اسم"], prefixes=""))
 async def set_name(client, message):
     if len(message.command) < 2: return await message.edit("❌ `نام جدید` یا `نام کامل نام فامیلی`")
     txt = message.text
@@ -808,7 +808,7 @@ async def auto_reply_cmd(client, message):
         await message.edit("❌ `پاسخ افزودن کلمه|پاسخ` | `پاسخ حذف کلمه` | `پاسخ لیست`")
 
 # ================== 🛠 ابزار ==================
-@app.on_message(filters.me & filters.command("ایدی", prefixes="") & filters.regex(r"^ایدی$"))
+@app.on_message(filters.me & filters.regex(r"^(ایدی|اطلاعات)$"))
 async def advanced_id_command(client, message):
     try:
         u = message.from_user; c = message.chat
@@ -958,9 +958,11 @@ async def photo_save_cmd(client, message):
     os.remove(p)
     await message.edit("✅ عکس در پیام‌های ذخیره‌شده ذخیره شد")
 
-@app.on_message(filters.me & filters.command("یادداشت", prefixes=""))
+@app.on_message(filters.me & filters.command(["یادداشت", "میمو"], prefixes=""))
 async def note_cmd(client, message):
     t = message.text.strip()
+    if t.startswith("میمو"): t = "یادداشت" + t[4:]   # میمو = یادداشت
+    if t == "یادداشت ها": return await notes_list_cmd(client, message)
     if t.startswith("یادداشت حذف "):
         nid = t.split()[-1]
         if nid in notes:
@@ -976,7 +978,7 @@ async def note_cmd(client, message):
     else:
         await message.edit("❌ `یادداشت متن` | `یادداشت‌ها` | `یادداشت حذف شماره`")
 
-@app.on_message(filters.me & filters.regex(r"^(یادداشت‌ها|یادداشت ها)$"))
+@app.on_message(filters.me & filters.regex(r"^(یادداشت‌ها|یادداشت ها|میمو‌ها|میمو ها)$"))
 async def notes_list_cmd(client, message):
     if notes:
         await message.edit("📝 **یادداشت‌ها:**\n" + "\n".join(f"• {k}: {v[:60]}" for k, v in notes.items()))
@@ -1264,7 +1266,7 @@ async def check_lock(client, message):
         try: await message.delete()
         except Exception: pass
 
-@app.on_message(filters.private & filters.incoming & (filters.photo | filters.video | filters.voice))
+@app.on_message(filters.private & filters.incoming & (filters.photo | filters.video | filters.voice), group=4)
 async def handle_timed_media(client, message):
     try:
         if message.photo and getattr(message.photo, 'ttl_seconds', None):
@@ -1326,11 +1328,781 @@ async def global_message_handler(client, message):
         try: await client.send_message(message.chat.id, random.choice(load_insults()), reply_to_message_id=message.id)
         except Exception: pass
 
-@app.on_message(filters.private & ~filters.me)
+@app.on_message(filters.private & ~filters.me, group=3)
 async def apply_actions_private(client, message): await apply_chat_actions(client, message)
 
-@app.on_message(filters.group & ~filters.me)
+@app.on_message(filters.group & ~filters.me, group=3)
 async def apply_actions_group(client, message): await apply_chat_actions(client, message)
+
+# ==============================================================================
+# ★ قابلیت‌های جدید Persian Gulf Self (صفحه ۲ و ۳ پنل) ★
+# ==============================================================================
+FEATURES_FILE = "features.json"
+_FEAT_DEFAULTS = {
+    "seen": False,
+    "filter_on": False, "filter_words": [],
+    "guard_on": False, "guard_links": False, "guard_chats": [],
+    "secretary_on": False, "secretary_text": "سلام 🌹 فعلاً در دسترس نیستم، به‌زودی پاسخ می‌دهم.",
+    "forcejoin_on": False, "forcejoin_chat": "",
+    "firstcomment_on": False, "firstcomment_text": "", "firstcomment_chats": [],
+    "friends": [],
+}
+feat = {**_FEAT_DEFAULTS, **jload(FEATURES_FILE, {})}
+def fsave(): jsave(FEATURES_FILE, feat)
+
+# نگاشت اکشن‌های پنل به کلیدهای feat (خاموش/روشن سریع از پنل هلپر)
+FEAT_TOGGLES = {
+    "toggle_seen": "seen", "toggle_filter": "filter_on", "toggle_guard": "guard_on",
+    "toggle_guardlinks": "guard_links", "toggle_secretary": "secretary_on",
+    "toggle_forcejoin": "forcejoin_on", "toggle_firstcomment": "firstcomment_on",
+}
+
+def _onoff(word): return word == "روشن"
+def _yn(v): return "🟢 روشن" if v else "🔴 خاموش"
+
+async def _safe_edit(message, text, **kw):
+    try: return await message.edit(text, **kw)
+    except TypeError:   # پارامتر اضافه (مثل disable_web_page_preview) در این نسخه Pyrogram نیست
+        try: return await message.edit(text)
+        except Exception: return None
+    except Exception: return None
+
+# ---------------------------------------------------------------- 🔍 سرچ
+def _wiki_search(q):
+    hdr = {"User-Agent": "PersianGulfSelf/1.0"}
+    for lang in ("fa", "en"):
+        try:
+            r = requests.get(f"https://{lang}.wikipedia.org/w/api.php", timeout=15, headers=hdr,
+                             params={"action": "query", "list": "search", "srsearch": q,
+                                     "format": "json", "srlimit": 4, "utf8": 1})
+            hits = r.json().get("query", {}).get("search", [])
+            if not hits: continue
+            title = hits[0]["title"]
+            s = requests.get(f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/" + urllib.parse.quote(title),
+                             timeout=15, headers=hdr).json()
+            url = (s.get("content_urls", {}).get("desktop", {}).get("page")
+                   or f"https://{lang}.wikipedia.org/wiki/" + urllib.parse.quote(title.replace(" ", "_")))
+            return {"lang": lang, "title": title, "extract": (s.get("extract") or "")[:700],
+                    "url": url, "others": [h["title"] for h in hits[1:]]}
+        except Exception:
+            continue
+    return None
+
+@app.on_message(filters.me & filters.regex(r"^سرچ .+"))
+async def search_cmd(client, message):
+    q = message.text.split(" ", 1)[1].strip()
+    await _safe_edit(message, "🔍 در حال جستجو...")
+    res = await asyncio.to_thread(_wiki_search, q)
+    if not res:
+        return await _safe_edit(message, f"❌ نتیجه‌ای برای «{q}» پیدا نشد")
+    t = f"🔍 **{res['title']}** ({'ویکی‌پدیا فارسی' if res['lang'] == 'fa' else 'Wikipedia EN'})\n\n{res['extract']}\n\n🔗 {res['url']}"
+    if res["others"]:
+        t += "\n\n📌 موارد مرتبط: " + " | ".join(res["others"])
+    await _safe_edit(message, t, disable_web_page_preview=True)
+
+# ---------------------------------------------------------------- 🎲 تقلب
+CHEAT_MAP = {"تاس": ("🎲", 6), "دارت": ("🎯", 6), "بولینگ": ("🎳", 6),
+             "بسکتبال": ("🏀", 5), "فوتبال": ("⚽", 5), "اسلات": ("🎰", 64)}
+
+@app.on_message(filters.me & filters.regex(r"^تقلب (تاس|دارت|بولینگ|بسکتبال|فوتبال|اسلات) (\d+)$"))
+async def cheat_cmd(client, message):
+    kind, val = message.matches[0].group(1), int(message.matches[0].group(2))
+    emoji, mx = CHEAT_MAP[kind]
+    if not 1 <= val <= mx:
+        return await _safe_edit(message, f"❌ برای {kind} عدد باید بین 1 تا {mx} باشد")
+    await _safe_edit(message, f"{emoji} در حال تلاش برای عدد {val} ...")
+    for _ in range(40):
+        try:
+            m = await client.send_dice(message.chat.id, emoji)
+        except FloodWait as e:
+            await asyncio.sleep(e.value + 1); continue
+        except Exception as e:
+            return await _safe_edit(message, f"❌ `{e}`")
+        if m.dice and m.dice.value == val:
+            try: await message.delete()
+            except Exception: pass
+            return
+        await asyncio.sleep(0.7)
+        try: await m.delete()
+        except Exception: pass
+    await _safe_edit(message, "😕 بعد از ۴۰ تلاش به عدد مورد نظر نرسید")
+
+# ---------------------------------------------------------------- 📸 اسکرین
+@app.on_message(filters.me & filters.regex(r"^اسکرین .+"))
+async def screenshot_cmd(client, message):
+    url = message.text.split(" ", 1)[1].strip()
+    if not re.match(r"^https?://", url): url = "https://" + url
+    await _safe_edit(message, "📸 در حال گرفتن اسکرین‌شات...")
+    def fetch():
+        r = requests.get("https://image.thum.io/get/width/1280/crop/800/noanimate/" + url, timeout=60)
+        if r.status_code != 200 or "image" not in r.headers.get("content-type", ""):
+            raise RuntimeError(f"HTTP {r.status_code}")
+        return r.content
+    try:
+        data = await asyncio.to_thread(fetch)
+        path = f"shot_{message.id}.png"
+        with open(path, "wb") as f: f.write(data)
+        await client.send_photo(message.chat.id, path, caption=f"📸 {url}")
+        os.remove(path)
+        await message.delete()
+    except Exception as e:
+        await _safe_edit(message, f"❌ اسکرین‌شات ناموفق بود: `{e}`")
+
+# ---------------------------------------------------------------- 💬 کامنت اول
+async def _resolve_chat(client, ref):
+    ref = ref.strip()
+    m = re.match(r"^(?:https?://)?t\.me/([\w\d_]+)", ref)
+    if m: ref = m.group(1)
+    return await client.get_chat(ref.lstrip("@"))
+
+@app.on_message(filters.me & filters.regex(r"^کامنت اول (روشن|خاموش)$"))
+async def fc_toggle(client, message):
+    feat["firstcomment_on"] = _onoff(message.matches[0].group(1)); fsave()
+    extra = ""
+    if feat["firstcomment_on"] and (not feat["firstcomment_text"] or not feat["firstcomment_chats"]):
+        extra = "\n⚠️ هنوز متن یا کانالی تنظیم نشده: `کامنت اول متن ...` و `کامنت اول افزودن @کانال`"
+    await _safe_edit(message, f"💬 کامنت اول: {_yn(feat['firstcomment_on'])}{extra}")
+
+@app.on_message(filters.me & filters.regex(r"^کامنت اول متن .+"))
+async def fc_text(client, message):
+    feat["firstcomment_text"] = message.text.split("متن", 1)[1].strip(); fsave()
+    await _safe_edit(message, "✅ متن کامنت اول ذخیره شد")
+
+@app.on_message(filters.me & filters.regex(r"^کامنت اول (افزودن|حذف) .+"))
+async def fc_chats(client, message):
+    parts = message.text.split(" ", 3)
+    act, ref = parts[2], parts[3] if len(parts) > 3 else ""
+    try:
+        chat = await _resolve_chat(client, ref)
+    except Exception as e:
+        return await _safe_edit(message, f"❌ کانال پیدا نشد: `{e}`")
+    if act == "افزودن":
+        if chat.id not in feat["firstcomment_chats"]: feat["firstcomment_chats"].append(chat.id)
+        msg = f"✅ «{chat.title}» به لیست کامنت اول اضافه شد"
+    else:
+        if chat.id in feat["firstcomment_chats"]: feat["firstcomment_chats"].remove(chat.id)
+        msg = f"🗑 «{chat.title}» از لیست حذف شد"
+    fsave(); await _safe_edit(message, msg)
+
+@app.on_message(filters.me & filters.regex(r"^کامنت اول لیست$"))
+async def fc_list(client, message):
+    lines = []
+    for cid in feat["firstcomment_chats"]:
+        try: lines.append(f"• {(await client.get_chat(cid)).title} (`{cid}`)")
+        except Exception: lines.append(f"• `{cid}`")
+    await _safe_edit(message, f"💬 **کامنت اول** {_yn(feat['firstcomment_on'])}\n📝 متن: {feat['firstcomment_text'] or '—'}\n\n"
+                              + ("\n".join(lines) if lines else "کانالی ثبت نشده"))
+
+@app.on_message(filters.channel, group=11)
+async def first_comment_handler(client, message):
+    if not (feat["firstcomment_on"] and feat["firstcomment_text"]): return
+    if message.chat.id not in feat["firstcomment_chats"]: return
+    try:
+        dm = await client.get_discussion_message(message.chat.id, message.id)
+        if dm: await dm.reply_text(feat["firstcomment_text"])
+    except Exception as e:
+        print("⚠️ کامنت اول ناموفق:", e)
+
+# ---------------------------------------------------------------- 🚫 فیلتر کلمات
+@app.on_message(filters.me & filters.regex(r"^فیلتر (روشن|خاموش)$"))
+async def wf_toggle(client, message):
+    feat["filter_on"] = _onoff(message.matches[0].group(1)); fsave()
+    await _safe_edit(message, f"🚫 فیلتر کلمات: {_yn(feat['filter_on'])} ({len(feat['filter_words'])} کلمه)")
+
+@app.on_message(filters.me & filters.regex(r"^فیلتر (افزودن|حذف) .+"))
+async def wf_edit(client, message):
+    parts = message.text.split(" ", 2)
+    act, word = parts[1], parts[2].strip()
+    if act == "افزودن":
+        if word not in feat["filter_words"]: feat["filter_words"].append(word)
+        msg = f"✅ «{word}» به فیلتر اضافه شد"
+    elif word in feat["filter_words"]:
+        feat["filter_words"].remove(word); msg = f"🗑 «{word}» حذف شد"
+    else:
+        msg = "❌ این کلمه در لیست نیست"
+    fsave(); await _safe_edit(message, msg)
+
+@app.on_message(filters.me & filters.regex(r"^فیلتر (لیست|پاکسازی)$"))
+async def wf_list(client, message):
+    if message.matches[0].group(1) == "پاکسازی":
+        feat["filter_words"].clear(); fsave()
+        return await _safe_edit(message, "🧹 لیست فیلتر پاک شد")
+    w = feat["filter_words"]
+    await _safe_edit(message, f"🚫 **فیلتر کلمات** {_yn(feat['filter_on'])}\n\n" + ("\n".join(f"• {x}" for x in w) if w else "لیست خالی است"))
+
+# ---------------------------------------------------------------- 📌 عضویت اجباری پیوی
+@app.on_message(filters.me & filters.regex(r"^عضویت اجباری (روشن|خاموش)$"))
+async def fj_toggle(client, message):
+    feat["forcejoin_on"] = _onoff(message.matches[0].group(1)); fsave()
+    extra = "" if feat["forcejoin_chat"] or not feat["forcejoin_on"] else "\n⚠️ کانال تنظیم نشده: `عضویت اجباری کانال @کانال`"
+    await _safe_edit(message, f"📌 عضویت اجباری پیوی: {_yn(feat['forcejoin_on'])}{extra}")
+
+@app.on_message(filters.me & filters.regex(r"^عضویت اجباری کانال .+"))
+async def fj_chat(client, message):
+    ref = message.text.split("کانال", 1)[1].strip()
+    try:
+        chat = await _resolve_chat(client, ref)
+    except Exception as e:
+        return await _safe_edit(message, f"❌ کانال پیدا نشد: `{e}`")
+    feat["forcejoin_chat"] = f"@{chat.username}" if chat.username else str(chat.id); fsave()
+    _fj_ok.clear()
+    await _safe_edit(message, f"✅ کانال عضویت اجباری: «{chat.title}»\n⚠️ حساب شما باید ادمین آن کانال باشد تا عضویت افراد قابل بررسی شود")
+
+# ---------------------------------------------------------------- 📰 منشی
+@app.on_message(filters.me & filters.regex(r"^منشی (روشن|خاموش)$"))
+async def sec_toggle(client, message):
+    feat["secretary_on"] = _onoff(message.matches[0].group(1)); fsave()
+    await _safe_edit(message, f"📰 منشی: {_yn(feat['secretary_on'])}")
+
+@app.on_message(filters.me & filters.regex(r"^منشی متن .+"))
+async def sec_text(client, message):
+    feat["secretary_text"] = message.text.split("متن", 1)[1].strip(); fsave()
+    await _safe_edit(message, "✅ متن منشی ذخیره شد")
+
+@app.on_message(filters.me & filters.regex(r"^منشی وضعیت$"))
+async def sec_status(client, message):
+    await _safe_edit(message, f"📰 **منشی** {_yn(feat['secretary_on'])}\n📝 متن:\n{feat['secretary_text']}")
+
+# ---------------------------------------------------------------- 🏷 تگ
+@app.on_message(filters.me & filters.regex(r"^تگ( .+)?$"))
+async def tagall_cmd(client, message):
+    if message.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+        return await _safe_edit(message, "❌ این دستور فقط در گروه کار می‌کند")
+    txt = (message.text.split(" ", 1)[1].strip() if " " in message.text else "📣")
+    from html import escape as _esc
+    members = []
+    try:
+        async for m in client.get_chat_members(message.chat.id, limit=100):
+            u = m.user
+            if u and not u.is_bot and not u.is_deleted: members.append(u)
+    except Exception as e:
+        return await _safe_edit(message, f"❌ دریافت اعضا ناموفق بود: `{e}`")
+    if not members:
+        return await _safe_edit(message, "❌ عضوی پیدا نشد")
+    await _safe_edit(message, f"🏷 در حال تگ {len(members)} نفر ...")
+    for i in range(0, len(members), 5):
+        chunk = members[i:i + 5]
+        line = " ".join(f'<a href="tg://user?id={u.id}">{_esc((u.first_name or "کاربر")[:12])}</a>' for u in chunk)
+        try:
+            await client.send_message(message.chat.id, f"{_esc(txt)}\n{line}", parse_mode=enums.ParseMode.HTML)
+        except FloodWait as e:
+            await asyncio.sleep(e.value + 1)
+        except Exception: pass
+        await asyncio.sleep(2)
+    try: await message.delete()
+    except Exception: pass
+
+# ---------------------------------------------------------------- 🗑 حذف (ریپلای)
+@app.on_message(filters.me & filters.regex(r"^حذف$"))
+async def delete_reply_cmd(client, message):
+    r = message.reply_to_message
+    if not r:
+        return await _safe_edit(message, "❌ روی پیامی که می‌خواهید حذف شود ریپلای کنید")
+    try:
+        await r.delete()
+        await message.delete()
+    except Exception as e:
+        await _safe_edit(message, f"❌ حذف نشد: `{e}`")
+
+# ---------------------------------------------------------------- 🤝 دوست
+FRIEND_LINES = ["🌹 قربانت", "😍 عزیزی", "🔥 دمت گرم", "❤️ دوستت دارم", "🙌 همیشه بهتر از بهترین‌ها"]
+
+@app.on_message(filters.me & filters.regex(r"^(دوست|حذف دوست|لیست دوست|دوستان|پاک کردن دوستان)$"))
+async def friend_cmd(client, message):
+    t = message.text
+    if t in ("دوست", "حذف دوست"):
+        if not (message.reply_to_message and message.reply_to_message.from_user):
+            return await _safe_edit(message, "❌ ریپلای کنید")
+        uid = message.reply_to_message.from_user.id
+        if t == "دوست":
+            if uid not in feat["friends"]: feat["friends"].append(uid)
+            msg = "🤝 دوست اضافه شد"
+        else:
+            if uid in feat["friends"]: feat["friends"].remove(uid)
+            msg = "✅ دوست حذف شد"
+        fsave(); return await _safe_edit(message, msg)
+    if t in ("لیست دوست", "دوستان"):
+        lines = []
+        for f in feat["friends"]:
+            try:
+                u = await client.get_users(f)
+                lines.append(f"• {u.first_name} | @{u.username or 'ندارد'} | `{f}`")
+            except Exception: lines.append(f"• `{f}`")
+        return await _safe_edit(message, f"🤝 **لیست دوستان ({len(feat['friends'])}):**\n" + ("\n".join(lines) if lines else "خالی است"))
+    feat["friends"].clear(); fsave()
+    await _safe_edit(message, "🧹 لیست دوستان پاک شد")
+
+# ---------------------------------------------------------------- 🕵️ کپی پروفایل
+PROFILE_BACKUP = "profile_backup.json"
+PROFILE_BACKUP_PHOTO = os.path.abspath("profile_backup.jpg")
+
+@app.on_message(filters.me & filters.regex(r"^کپی پروفایل( @?\w+)?$"))
+async def copy_profile_cmd(client, message):
+    target = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target = message.reply_to_message.from_user
+    else:
+        m = re.match(r"^کپی پروفایل @?(\w+)$", message.text.strip())
+        if m:
+            try: target = await client.get_users(m.group(1))
+            except Exception: target = None
+    if not target:
+        return await _safe_edit(message, "❌ ریپلای کنید یا بنویسید: `کپی پروفایل @یوزر`")
+    await _safe_edit(message, "🕵️ در حال کپی پروفایل...")
+    try:
+        me = await client.get_me()
+        if not os.path.exists(PROFILE_BACKUP):   # پشتیبان اولیه (فقط یک‌بار)
+            bio = ""
+            try: bio = (await client.get_chat("me")).bio or ""
+            except Exception: pass
+            ph = None
+            if me.photo:
+                try: ph = await client.download_media(me.photo.big_file_id, file_name=PROFILE_BACKUP_PHOTO)
+                except Exception: ph = None
+            jsave(PROFILE_BACKUP, {"first_name": me.first_name or "", "last_name": me.last_name or "", "bio": bio, "photo": ph})
+        t_bio = ""
+        try: t_bio = (await client.get_chat(target.id)).bio or ""
+        except Exception: pass
+        await client.update_profile(first_name=target.first_name or "خالی", last_name=target.last_name or "", bio=t_bio[:70])
+        if target.photo:
+            p = await client.download_media(target.photo.big_file_id)
+            await client.set_profile_photo(photo=p)
+        await _safe_edit(message, f"✅ پروفایل «{target.first_name}» کپی شد\n↩️ برای برگشت: `بازگردانی پروفایل`")
+    except Exception as e:
+        await _safe_edit(message, f"❌ `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^بازگردانی پروفایل$"))
+async def restore_profile_cmd(client, message):
+    bk = jload(PROFILE_BACKUP, None)
+    if not bk:
+        return await _safe_edit(message, "❌ پشتیبانی از پروفایل شما وجود ندارد")
+    try:
+        await client.update_profile(first_name=bk.get("first_name") or "خالی", last_name=bk.get("last_name", ""), bio=bk.get("bio", ""))
+        try:
+            async for ph in client.get_chat_photos("me", limit=1):
+                await client.delete_profile_photos(ph.file_id)
+        except Exception: pass
+        if bk.get("photo") and os.path.exists(bk["photo"]):
+            await client.set_profile_photo(photo=bk["photo"])
+        try: os.remove(PROFILE_BACKUP)
+        except Exception: pass
+        await _safe_edit(message, "✅ پروفایل اصلی شما بازگردانی شد")
+    except Exception as e:
+        await _safe_edit(message, f"❌ `{e}`")
+
+# ---------------------------------------------------------------- 🛡 نگهبان چت
+_guard_admins = {}     # chat_id -> (ts, set(ids))
+_guard_flood = {}      # (chat, user) -> [timestamps]
+
+@app.on_message(filters.me & filters.regex(r"^نگهبان (روشن|خاموش)$"))
+async def guard_toggle(client, message):
+    if message.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+        return await _safe_edit(message, "❌ این دستور را داخل گروه بزنید")
+    cid = message.chat.id
+    if _onoff(message.matches[0].group(1)):
+        if cid not in feat["guard_chats"]: feat["guard_chats"].append(cid)
+        feat["guard_on"] = True
+        msg = "🛡 نگهبان این گروه روشن شد\n⚠️ برای حذف پیام‌ها باید در گروه ادمین (با دسترسی حذف) باشید"
+    else:
+        if cid in feat["guard_chats"]: feat["guard_chats"].remove(cid)
+        if not feat["guard_chats"]: feat["guard_on"] = False
+        msg = "🛡 نگهبان این گروه خاموش شد"
+    fsave(); await _safe_edit(message, msg)
+
+@app.on_message(filters.me & filters.regex(r"^نگهبان لینک (روشن|خاموش)$"))
+async def guard_links_toggle(client, message):
+    feat["guard_links"] = _onoff(message.matches[0].group(1)); fsave()
+    await _safe_edit(message, f"🔗 حذف لینک توسط نگهبان: {_yn(feat['guard_links'])}")
+
+@app.on_message(filters.me & filters.regex(r"^نگهبان وضعیت$"))
+async def guard_status(client, message):
+    await _safe_edit(message, f"🛡 **نگهبان چت** {_yn(feat['guard_on'])}\n🔗 حذف لینک: {_yn(feat['guard_links'])}\n💬 گروه‌های تحت نگهبانی: {len(feat['guard_chats'])}")
+
+async def _guard_is_admin(client, chat_id, user_id):
+    now = time.time()
+    ts, ids = _guard_admins.get(chat_id, (0, set()))
+    if now - ts > 300:
+        ids = set()
+        try:
+            async for m in client.get_chat_members(chat_id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
+                if m.user: ids.add(m.user.id)
+        except Exception: pass
+        _guard_admins[chat_id] = (now, ids)
+    return user_id in ids
+
+_LINK_RE = re.compile(r"(https?://|t\.me/|telegram\.me/|www\.|@[A-Za-z][\w]{4,})", re.I)
+
+async def _nf_guard(client, message):
+    if not (feat["guard_on"] and message.chat.id in feat["guard_chats"]): return False
+    if message.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP) or not message.from_user: return False
+    uid, cid = message.from_user.id, message.chat.id
+    if await _guard_is_admin(client, cid, uid): return False
+    bad = False
+    if feat["guard_links"]:
+        txt = message.text or message.caption or ""
+        ents = (message.entities or []) + (message.caption_entities or [])
+        if _LINK_RE.search(txt) or any(str(getattr(e, "type", "")).lower().endswith(("url", "text_link")) for e in ents):
+            bad = True
+    now = time.time()
+    hist = [t for t in _guard_flood.get((cid, uid), []) if now - t < 8] + [now]
+    _guard_flood[(cid, uid)] = hist
+    flood = len(hist) >= 6
+    if not (bad or flood): return False
+    try: await message.delete()
+    except Exception: pass
+    if len(hist) >= 9:
+        try:
+            from datetime import timedelta
+            await client.restrict_chat_member(cid, uid, ChatPermissions(), until_date=datetime.now() + timedelta(minutes=10))
+            _guard_flood[(cid, uid)] = []
+        except Exception: pass
+    return True
+
+# ---------------------------------------------------------------- 🎨 لوگو
+def make_logo(text, out_path="logo.png"):
+    """لوگوی طلایی روی پس‌زمینه سرمه‌ای از متن می‌سازد"""
+    from PIL import Image, ImageDraw, ImageFilter, ImageOps
+    W, H = 1024, 512
+    rg = Image.radial_gradient("L").resize((W, H))
+    bg = ImageOps.colorize(rg, black=(24, 48, 96), white=(4, 8, 20)).convert("RGB")
+    txt = _panel_shape_text((text or "").strip()[:30] or "LOGO")
+    d0 = ImageDraw.Draw(bg)
+    fs = 220
+    ft = _panel_font(fs)
+    while d0.textlength(txt, font=ft) > W * 0.86 and fs > 30:
+        fs -= 6; ft = _panel_font(fs)
+    bb = d0.textbbox((0, 0), txt, font=ft, stroke_width=4)
+    tw, th = bb[2] - bb[0], bb[3] - bb[1]
+    x, y = (W - tw) // 2 - bb[0], (H - th) // 2 - bb[1] - 14
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).text((x, y), txt, font=ft, fill=255)
+    outline = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(outline).text((x, y), txt, font=ft, fill=255, stroke_width=4, stroke_fill=255)
+    # درخشش طلایی
+    glow = mask.filter(ImageFilter.GaussianBlur(20)).point(lambda v: int(v * 0.6))
+    bg = Image.composite(Image.new("RGB", (W, H), (255, 190, 60)), bg, glow)
+    # پر کردن با گرادیان طلایی
+    top, bot = y + bb[1], y + bb[3]
+    grad = Image.new("RGB", (W, H))
+    gd = ImageDraw.Draw(grad)
+    for row in range(H):
+        k = min(1.0, max(0.0, (row - top) / max(1, bot - top)))
+        gd.line([(0, row), (W, row)], fill=(int(255 - 45 * k), int(228 - 95 * k), int(130 - 80 * k)))
+    bg.paste((70, 40, 6), mask=outline)
+    bg.paste(grad, mask=mask)
+    # تزئینات زیر متن
+    d = ImageDraw.Draw(bg)
+    ly = min(H - 50, y + bb[3] + 46)
+    gold = (255, 205, 90)
+    d.line([(W * 0.18, ly), (W * 0.44, ly)], fill=gold, width=3)
+    d.line([(W * 0.56, ly), (W * 0.82, ly)], fill=gold, width=3)
+    d.polygon([(W / 2, ly - 14), (W / 2 + 14, ly), (W / 2, ly + 14), (W / 2 - 14, ly)], fill=gold)
+    bg.save(out_path, "PNG")
+    return out_path
+
+@app.on_message(filters.me & filters.regex(r"^لوگو .+"))
+async def logo_cmd(client, message):
+    text = message.text.split(" ", 1)[1].strip()
+    await _safe_edit(message, "🎨 در حال ساخت لوگو...")
+    path = f"logo_{message.id}.png"
+    try:
+        await asyncio.to_thread(make_logo, text, path)
+        await client.send_photo(message.chat.id, path)
+        os.remove(path)
+        await message.delete()
+    except Exception as e:
+        await _safe_edit(message, f"❌ ساخت لوگو ناموفق بود: `{e}`")
+
+# ---------------------------------------------------------------- 📝 محتوا
+def _fmt_size(n):
+    try: n = float(n)
+    except Exception: return "?"
+    for u in ("B", "KB", "MB", "GB"):
+        if n < 1024: return f"{n:.1f} {u}" if u != "B" else f"{int(n)} B"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+def _fmt_dur(s):
+    try: s = int(s)
+    except Exception: return "?"
+    return f"{s // 60}:{s % 60:02d}"
+
+def describe_message(m):
+    L = [f"🆔 پیام: `{getattr(m, 'id', '?')}`"]
+    g = lambda o, k, d=None: getattr(o, k, d)
+    kind = "متن"
+    if g(m, "photo"):
+        p = m.photo; kind = "عکس"; L.append(f"🖼 عکس {g(p,'width','?')}×{g(p,'height','?')} | {_fmt_size(g(p,'file_size'))}")
+    elif g(m, "video"):
+        v = m.video; kind = "ویدیو"; L.append(f"🎬 ویدیو {g(v,'width','?')}×{g(v,'height','?')} | {_fmt_dur(g(v,'duration'))} | {_fmt_size(g(v,'file_size'))}")
+    elif g(m, "animation"):
+        a = m.animation; kind = "گیف"; L.append(f"🎞 گیف {g(a,'width','?')}×{g(a,'height','?')} | {_fmt_dur(g(a,'duration'))} | {_fmt_size(g(a,'file_size'))}")
+    elif g(m, "video_note"):
+        v = m.video_note; kind = "ویدیو گرد"; L.append(f"⭕ ویدیو گرد | {_fmt_dur(g(v,'duration'))} | {_fmt_size(g(v,'file_size'))}")
+    elif g(m, "voice"):
+        v = m.voice; kind = "ویس"; L.append(f"🎙 ویس | {_fmt_dur(g(v,'duration'))} | {_fmt_size(g(v,'file_size'))}")
+    elif g(m, "audio"):
+        a = m.audio; kind = "موزیک"; L.append(f"🎵 {g(a,'title') or '—'} - {g(a,'performer') or '—'} | {_fmt_dur(g(a,'duration'))} | {_fmt_size(g(a,'file_size'))}")
+    elif g(m, "sticker"):
+        s = m.sticker; kind = "استیکر"; L.append(f"🩷 استیکر {g(s,'emoji') or ''} | پک: {g(s,'set_name') or '—'}")
+    elif g(m, "document"):
+        d = m.document; kind = "فایل"; L.append(f"📎 {g(d,'file_name') or 'بدون نام'} | {g(d,'mime_type') or '?'} | {_fmt_size(g(d,'file_size'))}")
+    elif g(m, "poll"):
+        pl = m.poll; kind = "نظرسنجی"; L.append(f"📊 {g(pl,'question')} | {len(g(pl,'options',[]) or [])} گزینه")
+    elif g(m, "contact"):
+        c = m.contact; kind = "مخاطب"; L.append(f"👤 {g(c,'first_name','')} {g(c,'phone_number','')}")
+    elif g(m, "location"):
+        l = m.location; kind = "لوکیشن"; L.append(f"📍 {g(l,'latitude')}, {g(l,'longitude')}")
+    elif g(m, "dice"):
+        dc = m.dice; kind = "بازی"; L.append(f"🎲 {g(dc,'emoji')} = {g(dc,'value')}")
+    text = g(m, "text") or g(m, "caption") or ""
+    if text:
+        L.append(f"✍️ متن: {len(text)} کاراکتر | {len(text.split())} کلمه")
+    ents = (g(m, "entities") or []) + (g(m, "caption_entities") or [])
+    if ents: L.append(f"🔤 فرمت/لینک‌ها: {len(ents)}")
+    L.insert(1, f"📦 نوع محتوا: **{kind}**")
+    d_ = g(m, "date")
+    if d_: L.append(f"🕒 {d_.strftime('%Y-%m-%d %H:%M:%S')}")
+    fw = g(m, "forward_from_chat") or g(m, "forward_from")
+    if fw: L.append(f"↪️ فوروارد از: {g(fw,'title') or g(fw,'first_name') or '?'}")
+    if g(m, "views"): L.append(f"👁 بازدید: {m.views}")
+    return "\n".join(L)
+
+@app.on_message(filters.me & filters.regex(r"^محتوا$"))
+async def content_cmd(client, message):
+    r = message.reply_to_message
+    if not r: return await _safe_edit(message, "❌ روی یک پیام ریپلای کنید")
+    await _safe_edit(message, "📝 **اطلاعات محتوا**\n\n" + describe_message(r))
+
+# ---------------------------------------------------------------- ⭐ استارزی / 💎 موجودی
+def _amount(b):
+    if b is None: return 0.0
+    if isinstance(b, (int, float)): return float(b)
+    a = float(getattr(b, "amount", 0) or 0)
+    if "ton" in type(b).__name__.lower(): return a / 1e9
+    return a + float(getattr(b, "nanos", 0) or 0) / 1e9
+
+async def _balance(client, ton=False):
+    from pyrogram.raw import types as rawtypes
+    kw = {"peer": rawtypes.InputPeerSelf()}
+    if ton: kw["ton"] = True
+    r = await client.invoke(rawfn.payments.GetStarsStatus(**kw))
+    return _amount(getattr(r, "balance", None))
+
+@app.on_message(filters.me & filters.regex(r"^(استارز|استارزی)$"))
+async def stars_cmd(client, message):
+    try:
+        v = await _balance(client)
+        await _safe_edit(message, f"⭐ **موجودی استارز:** `{v:,.0f}`")
+    except Exception as e:
+        await _safe_edit(message, f"❌ دریافت موجودی استارز ناموفق بود: `{e}`")
+
+@app.on_message(filters.me & filters.regex(r"^موجودی$"))
+async def balance_cmd(client, message):
+    out = []
+    try: out.append(f"⭐ استارز: `{await _balance(client):,.0f}`")
+    except Exception as e: out.append(f"⭐ استارز: ❌ `{e}`")
+    try: out.append(f"💎 تون (TON): `{await _balance(client, ton=True):.4f}`")
+    except Exception as e: out.append(f"💎 تون (TON): ❌ `{e}`")
+    await _safe_edit(message, "💰 **موجودی اکانت**\n\n" + "\n".join(out))
+
+# ---------------------------------------------------------------- 🎬 انیمیشن
+ANIMS = {
+    "ماه": ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"] * 2,
+    "قلب": ["❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎"] * 2,
+    "ساعت": ["🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚", "🕛"],
+    "موج": ["🌊", "🌊🌊", "🌊🌊🌊", "🌊🌊🌊🌊", "🌊🌊🌊", "🌊🌊", "🌊"] * 2,
+    "آتش": ["🔥", "🔥🔥", "🔥🔥🔥", "🔥🔥🔥🔥", "🔥🔥🔥🔥🔥"] * 2,
+}
+
+@app.on_message(filters.me & filters.regex(r"^انیمیشن .+"))
+async def anim_cmd(client, message):
+    arg = message.text.split(" ", 1)[1].strip()
+    if arg in ANIMS:
+        frames = ANIMS[arg]
+    else:   # افکت تایپ‌شونده
+        arg = arg[:200]
+        step = max(1, len(arg) // 20)
+        frames = [arg[:i] + " ▌" for i in range(step, len(arg), step)] + [arg]
+    last = None
+    for fr in frames:
+        if fr == last: continue
+        try:
+            await message.edit(fr); last = fr
+        except FloodWait as e:
+            await asyncio.sleep(e.value); 
+        except Exception: pass
+        await asyncio.sleep(0.6)
+
+# ---------------------------------------------------------------- 😍 ایموجی پریمیوم
+_EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u2764\u203C\u2049\u2122\u2139]\ufe0f?")
+_premoji_cache = {}
+
+def _utf16_len(s): return len(s.encode("utf-16-le")) // 2
+
+async def _premium_emoji_id(client, emoji):
+    key = emoji.replace("\ufe0f", "")
+    if key in _premoji_cache: return _premoji_cache[key]
+    did = None
+    try:
+        r = await client.invoke(rawfn.messages.SearchCustomEmoji(emoticon=emoji, hash=0))
+        ids = getattr(r, "document_id", None)
+        if ids: did = ids[0]
+    except Exception: pass
+    _premoji_cache[key] = did
+    return did
+
+@app.on_message(filters.me & filters.regex(r"^ایموجی پریمیوم( .+)?$"))
+async def premoji_cmd(client, message):
+    from pyrogram.types import MessageEntity
+    text = message.text.split(" ", 2)[2] if message.text.count(" ") >= 2 else ""
+    if not text and message.reply_to_message:
+        text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    if not text:
+        return await _safe_edit(message, "❌ `ایموجی پریمیوم متن ❤️🔥` یا ریپلای روی یک پیام")
+    me = await client.get_me()
+    if not getattr(me, "is_premium", False):
+        return await _safe_edit(message, "⚠️ ارسال ایموجی پریمیوم فقط با اکانت پریمیوم ممکن است")
+    ents, found = [], 0
+    for m in _EMOJI_RE.finditer(text):
+        did = await _premium_emoji_id(client, m.group(0))
+        if did:
+            found += 1
+            ents.append(MessageEntity(type=enums.MessageEntityType.CUSTOM_EMOJI,
+                                      offset=_utf16_len(text[:m.start()]), length=_utf16_len(m.group(0)),
+                                      custom_emoji_id=did))
+    if not found:
+        return await _safe_edit(message, "❌ ایموجی قابل تبدیل در متن پیدا نشد")
+    try:
+        await client.send_message(message.chat.id, text, entities=ents)
+        await message.delete()
+    except Exception as e:
+        await _safe_edit(message, f"❌ `{e}`")
+
+# ---------------------------------------------------------------- 🎥 ساخت ویدیو گرد
+def _ffmpeg_exe():
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        import shutil
+        return shutil.which("ffmpeg")
+
+def _round_cmd(exe, src, dst):
+    return [exe, "-y", "-i", src, "-t", "59",
+            "-vf", "crop='min(iw,ih)':'min(iw,ih)',scale=384:384,format=yuv420p",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+            "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", dst]
+
+@app.on_message(filters.me & filters.regex(r"^ساخت ویدیو گرد$"))
+async def round_video_cmd(client, message):
+    r = message.reply_to_message
+    media = r and (r.video or r.animation or r.video_note or (r.document and (r.document.mime_type or "").startswith("video")))
+    if not media:
+        return await _safe_edit(message, "❌ روی یک ویدیو یا گیف ریپلای کنید")
+    exe = _ffmpeg_exe()
+    if not exe:
+        return await _safe_edit(message, "❌ ffmpeg نصب نیست؛ `imageio-ffmpeg` را به requirements اضافه کنید")
+    await _safe_edit(message, "🎥 در حال ساخت ویدیو گرد...")
+    src = dst = None
+    try:
+        src = await client.download_media(r, file_name=os.path.abspath(f"rv_src_{message.id}"))
+        dst = os.path.abspath(f"rv_{message.id}.mp4")
+        proc = await asyncio.create_subprocess_exec(*_round_cmd(exe, src, dst),
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _, err = await asyncio.wait_for(proc.communicate(), 240)
+        if proc.returncode != 0 or not os.path.exists(dst):
+            raise RuntimeError((err or b"").decode(errors="ignore")[-200:] or "ffmpeg failed")
+        await client.send_video_note(message.chat.id, dst, length=384)
+        await message.delete()
+    except Exception as e:
+        await _safe_edit(message, f"❌ ساخت ویدیو گرد ناموفق بود: `{e}`")
+    finally:
+        for p in (src, dst):
+            try:
+                if p and os.path.exists(p): os.remove(p)
+            except Exception: pass
+
+# ---------------------------------------------------------------- هندلر پیام‌های ورودی برای قابلیت‌های جدید
+_fj_ok, _fj_notified, _sec_last, _friend_last, _seen_last = {}, {}, {}, {}, {}
+
+async def _nf_seen(client, message):
+    if not feat["seen"]: return
+    now = time.time()
+    if now - _seen_last.get(message.chat.id, 0) < 2: return
+    _seen_last[message.chat.id] = now
+    try: await client.read_chat_history(message.chat.id)
+    except Exception: pass
+
+async def _nf_filter(client, message):
+    if not (feat["filter_on"] and feat["filter_words"]): return False
+    txt = (message.text or message.caption or "").lower()
+    if txt and any(w.lower() in txt for w in feat["filter_words"]):
+        try:
+            await message.delete(); return True
+        except Exception:
+            return False
+    return False
+
+async def _nf_forcejoin(client, message):
+    if not (feat["forcejoin_on"] and feat["forcejoin_chat"]): return False
+    if message.chat.type != enums.ChatType.PRIVATE or not message.from_user: return False
+    u = message.from_user
+    if u.is_bot or u.is_self or u.id == 777000 or getattr(u, "is_contact", False): return False
+    now = time.time()
+    if now - _fj_ok.get(u.id, 0) < 600: return False
+    chat = feat["forcejoin_chat"]
+    chat = int(chat) if re.fullmatch(r"-?\d+", chat) else chat
+    try:
+        await client.get_chat_member(chat, u.id)
+        _fj_ok[u.id] = now
+        return False
+    except UserNotParticipant:
+        pass
+    except Exception as e:
+        print("⚠️ بررسی عضویت اجباری ناموفق:", e)
+        return False
+    if now - _fj_notified.get(u.id, 0) > 600:
+        _fj_notified[u.id] = now
+        try: await message.reply_text(f"📌 برای پیام دادن ابتدا در کانال {feat['forcejoin_chat']} عضو شوید و سپس دوباره پیام دهید.")
+        except Exception: pass
+    try: await message.delete()
+    except Exception: pass
+    return True
+
+async def _nf_secretary(client, message):
+    if not feat["secretary_on"] or afk_mode: return
+    if message.chat.type != enums.ChatType.PRIVATE or not message.from_user: return
+    u = message.from_user
+    if u.is_bot or u.is_self or u.id == 777000: return
+    now = time.time()
+    if now - _sec_last.get(u.id, 0) < 6 * 3600: return
+    _sec_last[u.id] = now
+    try: await message.reply_text(feat["secretary_text"])
+    except Exception: pass
+
+async def _nf_friend(client, message):
+    if not message.from_user or message.from_user.id not in feat["friends"]: return
+    try: await client.send_reaction(message.chat.id, message.id, "❤️")
+    except Exception: pass
+    uid = message.from_user.id
+    if message.text and random.random() < 0.2 and time.time() - _friend_last.get(uid, 0) > 300:
+        _friend_last[uid] = time.time()
+        try: await message.reply_text(random.choice(FRIEND_LINES))
+        except Exception: pass
+
+@app.on_message(~filters.me & filters.incoming, group=10)
+async def new_features_incoming(client, message):
+    try:
+        await _nf_seen(client, message)
+        if await _nf_filter(client, message): return
+        if await _nf_guard(client, message): return
+        if await _nf_forcejoin(client, message): return
+        await _nf_secretary(client, message)
+        await _nf_friend(client, message)
+    except Exception as e:
+        print("⚠️ خطا در قابلیت‌های جدید:", e)
+
 
 # ==============================================================================
 # ★ ساخت بنر پنل (عکس پروفایل + اسم) با Pillow ★
@@ -1503,7 +2275,7 @@ async def refresh_panel_banner():
     except Exception as e:
         _panel_banner_backoff = time.time() + 60
         import traceback
-        print("⚠️ ساخت بنر پنل ناموفق بود [r8]:", repr(e))
+        print("⚠️ ساخت بنر پنل ناموفق بود [r9]:", repr(e))
         print(traceback.format_exc())
     finally:
         _panel_banner_busy = False
@@ -1547,6 +2319,9 @@ async def build_panel_state():
             "anti_login": anti_login_enabled, "afk": afk_mode,
             "signature": signature_on, "auto_delete": auto_delete_seconds > 0,
             "time_on": bool(user_time_status.get(me.id)),
+            "seen_on": feat["seen"], "filter_on": feat["filter_on"], "guard_on": feat["guard_on"],
+            "guard_links": feat["guard_links"], "secretary_on": feat["secretary_on"],
+            "forcejoin_on": feat["forcejoin_on"], "firstcomment_on": feat["firstcomment_on"],
             "actions": dict(action_settings), "formats": dict(format_settings),
             "locks": dict(lock_settings),
             "enemies_count": len(enemies), "reactions_count": len(auto_reactions),
@@ -1582,6 +2357,8 @@ async def execute_panel_action(item):
             afk_mode = not afk_mode; afk_notified.clear()
         elif name == "toggle_signature": signature_on = not signature_on
         elif name == "toggle_autodel": auto_delete_seconds = 0 if auto_delete_seconds else 30
+        elif name in FEAT_TOGGLES:
+            k = FEAT_TOGGLES[name]; feat[k] = not feat[k]; fsave()
         elif name == "action_typing": action_settings["typing"] = not action_settings["typing"]
         elif name == "action_photo": action_settings["upload_photo"] = not action_settings["upload_photo"]
         elif name == "action_voice": action_settings["record_audio"] = not action_settings["record_audio"]
@@ -1671,7 +2448,7 @@ async def banner_loop():
         await asyncio.sleep(20)
 
 if __name__ == "__main__":
-    print("🧩 Persian Gulf Self | build panel-glass-r8 |", os.path.abspath(__file__))
+    print("🧩 Persian Gulf Self | build panel-pages-r9 |", os.path.abspath(__file__))
     if USER_ID: print(f"✅ Persian Gulf Self برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
     else: print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
     if not USER_ID and not os.path.exists("self.session"):
