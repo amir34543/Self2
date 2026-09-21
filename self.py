@@ -1266,27 +1266,11 @@ async def check_lock(client, message):
         try: await message.delete()
         except Exception: pass
 
-@app.on_message(filters.private & filters.incoming & (filters.photo | filters.video | filters.voice), group=4)
+@app.on_message(filters.private & filters.incoming & (filters.photo | filters.video | filters.voice | filters.video_note), group=4)
 async def handle_timed_media(client, message):
     try:
-        if message.photo and getattr(message.photo, 'ttl_seconds', None):
-            m, t, e = message.photo, 'photo', 'jpg'
-        elif message.video and getattr(message.video, 'ttl_seconds', None):
-            m, t, e = message.video, 'video', 'mp4'
-        elif message.voice and getattr(message.voice, 'ttl_seconds', None):
-            m, t, e = message.voice, 'voice', 'ogg'
-        else:
-            return
-        p = os.path.join(SAVED_PHOTOS_DIR, f'{t}-{random.randint(1000, 9999)}.{e}')
-        await client.download_media(message, p)
-        if os.path.exists(p):
-            s = message.from_user
-            u = f"@{s.username}" if s and s.username else "ندارد"
-            c = f"🔥 مدیای زمان‌دار ({t})\n👤 {s.first_name if s else '?'}\n🆔 {u}\n⏰ {datetime.now().strftime('%H:%M:%S')}"
-            if t == 'photo': await app.send_photo("me", p, caption=c)
-            elif t == 'video': await app.send_video("me", p, caption=c)
-            else: await app.send_voice("me", p, caption=c)
-            os.remove(p)
+        if feat.get("timed_save", True):
+            await save_timed_media(client, message)
     except Exception: pass
 
 @app.on_message(~filters.me & filters.incoming)
@@ -1340,8 +1324,9 @@ async def apply_actions_group(client, message): await apply_chat_actions(client,
 FEATURES_FILE = "features.json"
 _FEAT_DEFAULTS = {
     "seen": False,
-    "filter_on": False, "filter_words": [],
-    "guard_on": False, "guard_links": False, "guard_chats": [],
+    "filter_on": False, "filter_words": [], "filter_pv": True, "filter_groups": True,
+    "guard_on": False, "guard_links": False, "guard_chats": [], "guard_pv": False,
+    "timed_save": True, "timed_saved_count": 0,
     "secretary_on": False, "secretary_text": "سلام 🌹 فعلاً در دسترس نیستم، به‌زودی پاسخ می‌دهم.",
     "forcejoin_on": False, "forcejoin_chat": "",
     "firstcomment_on": False, "firstcomment_text": "", "firstcomment_chats": [],
@@ -1355,6 +1340,8 @@ FEAT_TOGGLES = {
     "toggle_seen": "seen", "toggle_filter": "filter_on", "toggle_guard": "guard_on",
     "toggle_guardlinks": "guard_links", "toggle_secretary": "secretary_on",
     "toggle_forcejoin": "forcejoin_on", "toggle_firstcomment": "firstcomment_on",
+    "toggle_filterpv": "filter_pv", "toggle_filtergroups": "filter_groups",
+    "toggle_guardpv": "guard_pv", "toggle_timedsave": "timed_save",
 }
 
 def _onoff(word): return word == "روشن"
@@ -1507,7 +1494,14 @@ async def first_comment_handler(client, message):
 @app.on_message(filters.me & filters.regex(r"^فیلتر (روشن|خاموش)$"))
 async def wf_toggle(client, message):
     feat["filter_on"] = _onoff(message.matches[0].group(1)); fsave()
-    await _safe_edit(message, f"🚫 فیلتر کلمات: {_yn(feat['filter_on'])} ({len(feat['filter_words'])} کلمه)")
+    await _safe_edit(message, f"🚫 فیلتر کلمات: {_yn(feat['filter_on'])} ({len(feat['filter_words'])} کلمه)\n"
+                              f"👤 پیوی: {_yn(feat['filter_pv'])} | 👥 گروه: {_yn(feat['filter_groups'])}")
+
+@app.on_message(filters.me & filters.regex(r"^فیلتر (پیوی|گروه) (روشن|خاموش)$"))
+async def wf_scope(client, message):
+    scope, val = message.matches[0].group(1), _onoff(message.matches[0].group(2))
+    feat["filter_pv" if scope == "پیوی" else "filter_groups"] = val; fsave()
+    await _safe_edit(message, f"🚫 فیلتر در {scope}: {_yn(val)}")
 
 @app.on_message(filters.me & filters.regex(r"^فیلتر (افزودن|حذف) .+"))
 async def wf_edit(client, message):
@@ -1714,9 +1708,14 @@ async def guard_links_toggle(client, message):
     feat["guard_links"] = _onoff(message.matches[0].group(1)); fsave()
     await _safe_edit(message, f"🔗 حذف لینک توسط نگهبان: {_yn(feat['guard_links'])}")
 
+@app.on_message(filters.me & filters.regex(r"^نگهبان پیوی (روشن|خاموش)$"))
+async def guard_pv_toggle(client, message):
+    feat["guard_pv"] = _onoff(message.matches[0].group(1)); fsave()
+    await _safe_edit(message, f"🛡 نگهبان پیوی: {_yn(feat['guard_pv'])}\n(مخاطبین و دوستان معاف‌اند؛ حذف دو طرفه)")
+
 @app.on_message(filters.me & filters.regex(r"^نگهبان وضعیت$"))
 async def guard_status(client, message):
-    await _safe_edit(message, f"🛡 **نگهبان چت** {_yn(feat['guard_on'])}\n🔗 حذف لینک: {_yn(feat['guard_links'])}\n💬 گروه‌های تحت نگهبانی: {len(feat['guard_chats'])}")
+    await _safe_edit(message, f"🛡 **نگهبان چت** {_yn(feat['guard_on'])}\n🔗 حذف لینک: {_yn(feat['guard_links'])}\n👤 نگهبان پیوی: {_yn(feat['guard_pv'])}\n💬 گروه‌های تحت نگهبانی: {len(feat['guard_chats'])}")
 
 async def _guard_is_admin(client, chat_id, user_id):
     now = time.time()
@@ -1732,17 +1731,37 @@ async def _guard_is_admin(client, chat_id, user_id):
 
 _LINK_RE = re.compile(r"(https?://|t\.me/|telegram\.me/|www\.|@[A-Za-z][\w]{4,})", re.I)
 
+def _has_link(message):
+    txt = (message.text or "") + " " + (message.caption or "")
+    ents = (message.entities or []) + (message.caption_entities or [])
+    return bool(_LINK_RE.search(txt) or any(str(getattr(e, "type", "")).lower().endswith(("url", "text_link")) for e in ents))
+
+async def _nf_guard_pv(client, message):
+    """نگهبان پیوی: لینک/فلود از غیرمخاطبین با حذف دو طرفه"""
+    if not feat["guard_pv"] or not message.from_user: return False
+    u = message.from_user
+    if u.is_bot or u.is_self or u.id == 777000 or getattr(u, "is_contact", False) or u.id in feat["friends"]:
+        return False
+    cid = message.chat.id
+    bad = feat["guard_links"] and _has_link(message)
+    now = time.time()
+    hist = [t for t in _guard_flood.get((cid, u.id), []) if now - t < 8] + [now]
+    _guard_flood[(cid, u.id)] = hist
+    if not (bad or len(hist) >= 6): return False
+    try:
+        await client.delete_messages(cid, message.id, revoke=True)
+        return True
+    except Exception:
+        return False
+
 async def _nf_guard(client, message):
+    if message.chat.type == enums.ChatType.PRIVATE:
+        return await _nf_guard_pv(client, message)
     if not (feat["guard_on"] and message.chat.id in feat["guard_chats"]): return False
     if message.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP) or not message.from_user: return False
     uid, cid = message.from_user.id, message.chat.id
     if await _guard_is_admin(client, cid, uid): return False
-    bad = False
-    if feat["guard_links"]:
-        txt = message.text or message.caption or ""
-        ents = (message.entities or []) + (message.caption_entities or [])
-        if _LINK_RE.search(txt) or any(str(getattr(e, "type", "")).lower().endswith(("url", "text_link")) for e in ents):
-            bad = True
+    bad = feat["guard_links"] and _has_link(message)
     now = time.time()
     hist = [t for t in _guard_flood.get((cid, uid), []) if now - t < 8] + [now]
     _guard_flood[(cid, uid)] = hist
@@ -2023,6 +2042,63 @@ async def round_video_cmd(client, message):
                 if p and os.path.exists(p): os.remove(p)
             except Exception: pass
 
+# ---------------------------------------------------------------- ⏳ ذخیره تایمدار
+def _ttl_info(message):
+    for attr, ext, kind in (("photo", "jpg", "عکس"), ("video", "mp4", "ویدیو"),
+                            ("voice", "ogg", "ویس"), ("video_note", "mp4", "ویدیو گرد")):
+        m = getattr(message, attr, None)
+        if m and getattr(m, "ttl_seconds", None):
+            return attr, ext, kind, m.ttl_seconds
+    return None
+
+async def save_timed_media(client, message):
+    """مدیای زمان‌دار (خودتخریب‌شونده) را در Saved Messages ذخیره می‌کند؛ True اگر ذخیره شد"""
+    info = _ttl_info(message)
+    if not info: return False
+    attr, ext, kind, ttl = info
+    os.makedirs(SAVED_PHOTOS_DIR, exist_ok=True)
+    path = os.path.join(SAVED_PHOTOS_DIR, f"timed-{attr}-{message.id}-{random.randint(1000, 9999)}.{ext}")
+    await client.download_media(message, path)
+    if not os.path.exists(path):
+        raise RuntimeError("دانلود مدیا ممکن نشد")
+    s = message.from_user
+    u = f"@{s.username}" if s and s.username else "ندارد"
+    ttl_txt = f"{ttl}s" if isinstance(ttl, int) and ttl < 100000 else "یک‌بار مشاهده"
+    cap = (f"🔥 مدیای زمان‌دار ({kind})\n👤 {s.first_name if s else '?'}\n🆔 {u}\n"
+           f"⏳ تایمر: {ttl_txt}\n⏰ {datetime.now().strftime('%H:%M:%S')}")
+    try:
+        if attr == "photo": await client.send_photo("me", path, caption=cap)
+        elif attr == "video": await client.send_video("me", path, caption=cap)
+        elif attr == "video_note":
+            await client.send_video_note("me", path)
+            await client.send_message("me", cap)
+        else: await client.send_voice("me", path, caption=cap)
+    finally:
+        try: os.remove(path)
+        except Exception: pass
+    feat["timed_saved_count"] = feat.get("timed_saved_count", 0) + 1; fsave()
+    return True
+
+@app.on_message(filters.me & filters.regex(r"^ذخیره تایمدار (روشن|خاموش)$"))
+async def timed_toggle(client, message):
+    feat["timed_save"] = _onoff(message.matches[0].group(1)); fsave()
+    await _safe_edit(message, f"⏳ ذخیره خودکار مدیای تایمدار: {_yn(feat['timed_save'])}")
+
+@app.on_message(filters.me & filters.regex(r"^ذخیره تایمدار وضعیت$"))
+async def timed_status(client, message):
+    await _safe_edit(message, f"⏳ **ذخیره تایمدار** {_yn(feat['timed_save'])}\n📦 تعداد ذخیره‌شده: {feat.get('timed_saved_count', 0)}")
+
+@app.on_message(filters.me & filters.regex(r"^ذخیره تایمدار$"))
+async def timed_manual(client, message):
+    r = message.reply_to_message
+    if not r:
+        return await _safe_edit(message, "❌ روی یک عکس/ویدیو/ویس تایمدار ریپلای کنید")
+    try:
+        ok = await save_timed_media(client, r)
+    except Exception as e:
+        return await _safe_edit(message, f"❌ ذخیره نشد (مدیای تایمدار بعد از باز شدن حذف می‌شود): `{e}`")
+    await _safe_edit(message, "✅ در پیام‌های ذخیره‌شده ذخیره شد" if ok else "❌ این پیام مدیای تایمدار ندارد")
+
 # ---------------------------------------------------------------- هندلر پیام‌های ورودی برای قابلیت‌های جدید
 _fj_ok, _fj_notified, _sec_last, _friend_last, _seen_last = {}, {}, {}, {}, {}
 
@@ -2034,12 +2110,27 @@ async def _nf_seen(client, message):
     try: await client.read_chat_history(message.chat.id)
     except Exception: pass
 
+def _norm_fa(s):
+    """یکسان‌سازی متن فارسی (ی/ک عربی، نیم‌فاصله، کشیده، اعراب) برای تطبیق دقیق‌تر فیلتر"""
+    s = (s or "").lower().replace("ي", "ی").replace("ك", "ک").replace("ۀ", "ه").replace("ة", "ه")
+    return re.sub(r"[\u200c\u200d\u200e\u200f\u0640\u064b-\u065f\u0670]", "", s)
+
 async def _nf_filter(client, message):
+    """حذف پیام‌های شامل کلمه فیلتر شده؛ هم در پیوی (حذف دو طرفه) و هم در گروه‌ها"""
     if not (feat["filter_on"] and feat["filter_words"]): return False
-    txt = (message.text or message.caption or "").lower()
-    if txt and any(w.lower() in txt for w in feat["filter_words"]):
+    ct = message.chat.type
+    if ct == enums.ChatType.PRIVATE:
+        if not feat["filter_pv"]: return False
+    elif ct in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+        if not feat["filter_groups"]: return False
+    else:
+        return False
+    txt = _norm_fa((message.text or "") + " " + (message.caption or ""))
+    if not txt: return False
+    if any(w.strip() and _norm_fa(w) in txt for w in feat["filter_words"]):
         try:
-            await message.delete(); return True
+            await client.delete_messages(message.chat.id, message.id, revoke=True)
+            return True
         except Exception:
             return False
     return False
@@ -2102,6 +2193,12 @@ async def new_features_incoming(client, message):
         await _nf_friend(client, message)
     except Exception as e:
         print("⚠️ خطا در قابلیت‌های جدید:", e)
+
+@app.on_edited_message(~filters.me & filters.incoming, group=12)
+async def new_features_edited(client, message):
+    """ویرایش پیام برای دور زدن فیلتر"""
+    try: await _nf_filter(client, message)
+    except Exception: pass
 
 
 # ==============================================================================
@@ -2275,7 +2372,7 @@ async def refresh_panel_banner():
     except Exception as e:
         _panel_banner_backoff = time.time() + 60
         import traceback
-        print("⚠️ ساخت بنر پنل ناموفق بود [r9]:", repr(e))
+        print("⚠️ ساخت بنر پنل ناموفق بود [r10]:", repr(e))
         print(traceback.format_exc())
     finally:
         _panel_banner_busy = False
@@ -2321,6 +2418,8 @@ async def build_panel_state():
             "time_on": bool(user_time_status.get(me.id)),
             "seen_on": feat["seen"], "filter_on": feat["filter_on"], "guard_on": feat["guard_on"],
             "guard_links": feat["guard_links"], "secretary_on": feat["secretary_on"],
+            "filter_pv": feat["filter_pv"], "filter_groups": feat["filter_groups"], "guard_pv": feat["guard_pv"],
+            "timed_save_on": feat["timed_save"],
             "forcejoin_on": feat["forcejoin_on"], "firstcomment_on": feat["firstcomment_on"],
             "actions": dict(action_settings), "formats": dict(format_settings),
             "locks": dict(lock_settings),
@@ -2448,7 +2547,7 @@ async def banner_loop():
         await asyncio.sleep(20)
 
 if __name__ == "__main__":
-    print("🧩 Persian Gulf Self | build panel-pages-r9 |", os.path.abspath(__file__))
+    print("🧩 Persian Gulf Self | build panel-timed-r10 |", os.path.abspath(__file__))
     if USER_ID: print(f"✅ Persian Gulf Self برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
     else: print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
     if not USER_ID and not os.path.exists("self.session"):
