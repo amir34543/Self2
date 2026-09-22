@@ -14,6 +14,12 @@ import pytz
 from pyrogram import enums
 from pyrogram.raw import functions as rawfn
 from pyrogram.errors import FloodWait, UserNotParticipant
+try:
+    from pyrogram.errors import ChatAdminRequired, PeerIdInvalid, ChannelPrivate
+except ImportError:
+    class ChatAdminRequired(Exception): pass
+    class PeerIdInvalid(Exception): pass
+    class ChannelPrivate(Exception): pass
 
 bot_username = "Helperbotpersian_bot"  # یوزرنیم ربات هلپر بدون @
 
@@ -161,28 +167,92 @@ NO_PERMS = ChatPermissions(can_send_messages=False, can_send_media_messages=Fals
                            can_send_other_messages=False, can_add_web_page_previews=False)
 
 # ================== فونت زمان / فانتزی / جک ==================
-TIME_FONTS = {1: "𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗", 2: "𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟯", 3: "０１２３４５６７８９",
-              4: "𝟢𝟣𝟤𝟥𝟦𝟧𝟨𝟩𝟪𝟫", 5: "𝟘𝟙𝟚𝟛𝟜𝟝𝟞𝟟𝟠𝟡", 6: "dashed"}
+TIME_FONTS = {
+    1: ["𝟎", "𝟏", "𝟐", "𝟑", "𝟒", "𝟓", "𝟔", "𝟕", "𝟖", "𝟗"],  # بولد
+    2: ["𝟬", "𝟭", "𝟮", "𝟯", "𝟰", "𝟱", "𝟲", "𝟳", "𝟴", "𝟵"],  # سنس‌بولد
+    3: ["０", "１", "２", "３", "４", "５", "６", "７", "８", "９"],  # تمام‌عرض
+    4: ["𝟢", "𝟣", "𝟤", "𝟥", "𝟦", "𝟧", "𝟨", "𝟩", "𝟪", "𝟫"],  # سنس
+    5: ["𝟘", "𝟙", "𝟚", "𝟛", "𝟜", "𝟝", "𝟞", "𝟟", "𝟠", "𝟡"],  # دابل‌استراک
+    7: ["𝟶", "𝟷", "𝟸", "𝟹", "𝟺", "𝟻", "𝟼", "𝟽", "𝟾", "𝟿"],  # مونو‌اسپیس
+    8: ["⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"],  # بالانویس
+    9: ["₀", "₁", "₂", "₃", "₄", "₅", "₆", "₇", "₈", "₉"],  # پایین‌نویس
+    10: ["⓪", "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨"],  # دایره‌ای
+    11: ["⓿", "❶", "❷", "❸", "❹", "❺", "❻", "❼", "❽", "❾"],  # دایره پر
+    12: ["0", "⑴", "⑵", "⑶", "⑷", "⑸", "⑹", "⑺", "⑻", "⑼"],  # پرانتزی
+    13: ["0", "⒈", "⒉", "⒊", "⒋", "⒌", "⒍", "⒎", "⒏", "⒐"],  # نقطه‌دار
+    14: ["0̲", "1̲", "2̲", "3̲", "4̲", "5̲", "6̲", "7̲", "8̲", "9̲"],  # زیرخط
+    15: ["0̳", "1̳", "2̳", "3̳", "4̳", "5̳", "6̳", "7̳", "8̳", "9̳"],  # زیرخط دوبل
+    16: ["0̶", "1̶", "2̶", "3̶", "4̶", "5̶", "6̶", "7̶", "8̶", "9̶"],  # خط‌خورده
+    17: ["0̅", "1̅", "2̅", "3̅", "4̅", "5̅", "6̅", "7̅", "8̅", "9̅"],  # روخط
+    18: ["0̿", "1̿", "2̿", "3̿", "4̿", "5̿", "6̿", "7̿", "8̿", "9̿"],  # روخط دوبل
+    19: ["0̃", "1̃", "2̃", "3̃", "4̃", "5̃", "6̃", "7̃", "8̃", "9̃"],  # مواج
+    20: ["0̂", "1̂", "2̂", "3̂", "4̂", "5̂", "6̂", "7̂", "8̂", "9̂"],  # سقفی
+    21: ["0̊", "1̊", "2̊", "3̊", "4̊", "5̊", "6̊", "7̊", "8̊", "9̊"],  # حلقه‌دار
+    22: ["0̇", "1̇", "2̇", "3̇", "4̇", "5̇", "6̇", "7̇", "8̇", "9̇"],  # نقطه بالا
+    23: ["0̣", "1̣", "2̣", "3̣", "4̣", "5̣", "6̣", "7̣", "8̣", "9̣"],  # نقطه پایین
+    24: ["0̄", "1̄", "2̄", "3̄", "4̄", "5̄", "6̄", "7̄", "8̄", "9̄"],  # ماکرون
+    25: ["0̱", "1̱", "2̱", "3̱", "4̱", "5̱", "6̱", "7̱", "8̱", "9̱"],  # زیرخط ضخیم
+    26: ["0̀", "1̀", "2̀", "3̀", "4̀", "5̀", "6̀", "7̀", "8̀", "9̀"],  # گریو
+    27: ["0́", "1́", "2́", "3́", "4́", "5́", "6́", "7́", "8́", "9́"],  # آکوت
+    28: ["0̈", "1̈", "2̈", "3̈", "4̈", "5̈", "6̈", "7̈", "8̈", "9̈"],  # دیارز
+    29: ["0̆", "1̆", "2̆", "3̆", "4̆", "5̆", "6̆", "7̆", "8̆", "9̆"],  # بروه
+    30: ["0̌", "1̌", "2̌", "3̌", "4̌", "5̌", "6̌", "7̌", "8̌", "9̌"],  # کارون
+    6: None,  # خط‌دار کلاسیک — مورد خاص، در fa_time_str مدیریت می‌شود
+}
 
 def fa_time_str(fid=1):
     t = datetime.now(pytz.timezone("Asia/Tehran")).strftime("%H:%M")
     if fid == 6:
         return "".join(ch + "\u0334" for ch in t)
-    digits = TIME_FONTS.get(fid, TIME_FONTS[1])
-    return t.translate(str.maketrans("0123456789", digits))
+    digits = TIME_FONTS.get(fid) or TIME_FONTS[1]
+    return t.translate({ord(str(i)): digits[i] for i in range(10)})
 
 def _alpha(lo, up):
     return str.maketrans("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", lo + up)
 
 FANCY_TRANS = {
-    1: _alpha("𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇", "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"),
-    2: _alpha("𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻", "𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡"),
-    3: _alpha("𝕒𝕓𝕔𝕕𝕖𝕗𝕘𝕙𝕚𝕛𝕜𝕝𝕞𝕟𝕠𝕡𝕢𝕣𝕤𝕥𝕦𝕧𝕨𝕩𝕪𝕫", "𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃𝕄ℕ𝕆ℙℚℝ𝕊𝕋𝕌𝕍𝕎𝕏𝕐ℤ"),
-    4: _alpha("ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ", "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ"),
-    5: _alpha("ⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ", "ⒶⒷⒸⒹⒺⒻⒼⒽⒾⒿⓀⓁⓂⓃⓄⓅⓆⓇⓈⓉⓊⓋⓌⓍⓎⓏ"),
-    6: _alpha("𝖆𝖇𝖈𝖉𝖊𝖋𝖌𝖍𝖎𝖏𝖐𝖑𝖒𝖓𝖔𝖕𝖖𝖗𝖘𝖙𝖚𝖛𝖜𝖝𝖞𝖟", "𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅"),
+    1: _alpha("𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇", "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"),  # سنس‌بولد
+    2: _alpha("𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻", "𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡"),  # سنس‌ایتالیک
+    3: _alpha("𝕒𝕓𝕔𝕕𝕖𝕗𝕘𝕙𝕚𝕛𝕜𝕝𝕞𝕟𝕠𝕡𝕢𝕣𝕤𝕥𝕦𝕧𝕨𝕩𝕪𝕫", "𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃𝕄ℕ𝕆ℙℚℝ𝕊𝕋𝕌𝕍𝕎𝕏𝕐ℤ"),  # دابل‌استراک
+    5: _alpha("ⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ", "ⒶⒷⒸⒹⒺⒻⒼⒽⒾⒿⓀⓁⓂⓃⓄⓅⓆⓇⓈⓉⓊⓋⓌⓍⓎⓏ"),  # دایره‌ای
+    6: _alpha("𝖆𝖇𝖈𝖉𝖊𝖋𝖌𝖍𝖎𝖏𝖐𝖑𝖒𝖓𝖔𝖕𝖖𝖗𝖘𝖙𝖚𝖛𝖜𝖝𝖞𝖟", "𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅"),  # فراکتور بولد
+    7: _alpha("𝙖𝙗𝙘𝙙𝙚𝙛𝙜𝙝𝙞𝙟𝙠𝙡𝙢𝙣𝙤𝙥𝙦𝙧𝙨𝙩𝙪𝙫𝙬𝙭𝙮𝙯", "𝘼𝘽𝘾𝘿𝙀𝙁𝙂𝙃𝙄𝙅𝙆𝙇𝙈𝙉𝙊𝙋𝙌𝙍𝙎𝙏𝙐𝙑𝙒𝙓𝙔𝙕"),  # سنس‌بولدایتالیک
+    8: _alpha("𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣", "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉"),  # مونو‌اسپیس
+    9: _alpha("𝖺𝖻𝖼𝖽𝖾𝖿𝗀𝗁𝗂𝗃𝗄𝗅𝗆𝗇𝗈𝗉𝗊𝗋𝗌𝗍𝗎𝗏𝗐𝗑𝗒𝗓", "𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹"),  # سنس
+    10: _alpha("𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳", "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙"),  # بولد
+    11: _alpha("𝑎𝑏𝑐𝑑𝑒𝑓𝑔ℎ𝑖𝑗𝑘𝑙𝑚𝑛𝑜𝑝𝑞𝑟𝑠𝑡𝑢𝑣𝑤𝑥𝑦𝑧", "𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍"),  # ایتالیک
+    12: _alpha("𝒂𝒃𝒄𝒅𝒆𝒇𝒈𝒉𝒊𝒋𝒌𝒍𝒎𝒏𝒐𝒑𝒒𝒓𝒔𝒕𝒖𝒗𝒘𝒙𝒚𝒛", "𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁"),  # بولدایتالیک
+    13: _alpha("𝒶𝒷𝒸𝒹ℯ𝒻ℊ𝒽𝒾𝒿𝓀𝓁𝓂𝓃ℴ𝓅𝓆𝓇𝓈𝓉𝓊𝓋𝓌𝓍𝓎𝓏", "𝒜ℬ𝒞𝒟ℰℱ𝒢ℋℐ𝒥𝒦ℒℳ𝒩𝒪𝒫𝒬ℛ𝒮𝒯𝒰𝒱𝒲𝒳𝒴𝒵"),  # اسکریپت
+    14: _alpha("𝓪𝓫𝓬𝓭𝓮𝓯𝓰𝓱𝓲𝓳𝓴𝓵𝓶𝓷𝓸𝓹𝓺𝓻𝓼𝓽𝓾𝓿𝔀𝔁𝔂𝔃", "𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩"),  # بولداسکریپت
+    15: _alpha("𝔞𝔟𝔠𝔡𝔢𝔣𝔤𝔥𝔦𝔧𝔨𝔩𝔪𝔫𝔬𝔭𝔮𝔯𝔰𝔱𝔲𝔳𝔴𝔵𝔶𝔷", "𝔄𝔅ℭ𝔇𝔈𝔉𝔊ℌℑ𝔍𝔎𝔏𝔐𝔑𝔒𝔓𝔔ℜ𝔖𝔗𝔘𝔙𝔚𝔛𝔜ℨ"),  # فراکتور
+    16: _alpha("ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ", "ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ"),  # تمام‌عرض
+    4: _alpha("ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ", "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ"),  # کوچک‌بزرگ (Small Caps)
 }
-WRAPPERS = {1: ("꧁ ", " ꧂"), 2: ("✦ ", " ✦"), 3: ("༺ ", " ༻"), 4: ("「 ", " 」"), 5: ("★ ", " ★"), 6: ("『 ", " 』")}
+
+_ALPHA_ALL = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+FANCY_COMB_MARKS = [
+    '̲',
+    '̳',
+    '̶',
+    '̅',
+    '̃',
+    '̂',
+    '̊',
+    '̇',
+    '̣',
+    '̄',
+    '̀',
+    '́',
+    '̈',
+    '̆',
+]
+for _i, _mk in enumerate(FANCY_COMB_MARKS):
+    FANCY_TRANS[17 + _i] = {ord(c): c + _mk for c in _ALPHA_ALL}
+WRAPPERS = {1: ("꧁ ", " ꧂"), 2: ("✦ ", " ✦"), 3: ("༺ ", " ༻"), 4: ("「 ", " 」"), 5: ("★ ", " ★"), 6: ("『 ", " 』"),
+            7: ("◈ ", " ◈"), 8: ("♦ ", " ♦"), 9: ("☾ ", " ☽"), 10: ("▧ ", " ▧"), 11: ("▣ ", " ▣"), 12: ("❖ ", " ❖"),
+            13: ("⟡ ", " ⟡"), 14: ("꒰ ", " ꒱"), 15: ("⚡ ", " ⚡"), 16: ("🔥 ", " 🔥"), 17: ("❁ ", " ❁"), 18: ("☆ ", " ☆"),
+            19: ("⌈ ", " ⌉"), 20: ("» ", " «"), 21: ("⊰ ", " ⊱"), 22: ("◇ ", " ◇"), 23: ("✧ ", " ✧"), 24: ("⋆ ", " ⋆"),
+            25: ("⟦ ", " ⟧"), 26: ("☙ ", " ❧"), 27: ("➤ ", " ➤"), 28: ("⁘ ", " ⁘"), 29: ("✵ ", " ✵"), 30: ("꧁", "꧂")}
 
 JOKES = [
     "به یارو میگن چرا شب‌ها در اتاقت رو قفل می‌کنی؟ میگه تا صبح کسی خوابش نپره! 😂",
@@ -429,25 +499,31 @@ async def set_name(client, message):
         await message.edit("✅ نام تغییر کرد")
     except Exception as e: await message.edit(f"❌ `{e}`")
 
-@app.on_message(filters.me & filters.command("تایم", prefixes="") & filters.regex(r"^تایم (روشن|خاموش)$"))
-async def time_command(client, message):
+async def _apply_time_toggle(client, message, on):
     global user_fonts
-    a = message.command[1]
     uid = message.from_user.id
-    if a == "روشن":
+    if on:
         user_time_status[uid] = True
         user_original_names.setdefault(uid, message.from_user.first_name or "")
         fid = user_fonts.get(uid, 1)
         await app.update_profile(first_name=f"{user_original_names.get(uid)} {fa_time_str(fid)}")
-        await message.edit(f"✅ تایم روشن شد\n⏰ {fa_time_str(fid)}")
+        await message.edit(f"✅ ساعت در اسم (تایم) روشن شد\n⏰ {fa_time_str(fid)}")
     else:
         user_time_status[uid] = False
         if uid in user_original_names:
             try: await app.update_profile(first_name=user_original_names[uid])
             except Exception: pass
-        await message.edit("✅ تایم خاموش شد")
+        await message.edit("✅ ساعت در اسم (تایم) خاموش شد")
 
-@app.on_message(filters.me & filters.regex(r"^(لیست فونت|تنظیم فونت \d)$"))
+@app.on_message(filters.me & filters.command("تایم", prefixes="") & filters.regex(r"^تایم (روشن|خاموش)$"))
+async def time_command(client, message):
+    await _apply_time_toggle(client, message, message.command[1] == "روشن")
+
+@app.on_message(filters.me & filters.regex(r"^ساعت نام (روشن|خاموش)$"))
+async def clock_name_alias_cmd(client, message):
+    await _apply_time_toggle(client, message, message.matches[0].group(1) == "روشن")
+
+@app.on_message(filters.me & filters.regex(r"^(لیست فونت|تنظیم فونت \d+)$"))
 async def font_cmd(client, message):
     global user_fonts
     t = message.text
@@ -1102,7 +1178,7 @@ async def story_viewers_cmd(client, message):
         await m.edit(f"❌ `{e}`")
 
 # ================== 🎩 ترفند / 🎲 سرگرمی ==================
-@app.on_message(filters.me & filters.regex(r"^قلم \d .+"))
+@app.on_message(filters.me & filters.regex(r"^قلم \d+ .+"))
 async def fancy_cmd(client, message):
     parts = message.text.split(" ", 2)
     try: sid = int(parts[1])
@@ -1110,6 +1186,15 @@ async def fancy_cmd(client, message):
     tr = FANCY_TRANS.get(sid); w = WRAPPERS.get(sid, ("", ""))
     out = w[0] + (parts[2].translate(tr) if tr else parts[2]) + w[1]
     await message.edit(out)
+
+@app.on_message(filters.me & filters.regex(r"^لیست قلم$"))
+async def fancy_list_cmd(client, message):
+    sample = "Persian Gulf 123"
+    lines = []
+    for i in sorted(FANCY_TRANS):
+        w = WRAPPERS.get(i, ("", ""))
+        lines.append(f"{i} - {w[0]}{sample.translate(FANCY_TRANS[i])}{w[1]}")
+    await _safe_edit(message, "🔤 **۳۰ فونت متن (قلم):**\n\n" + "\n".join(lines) + "\n\n✅ با `قلم شماره متن` استفاده کنید")
 
 @app.on_message(filters.me & filters.regex(r"^(تاس|ریسه|بسکتبال|دارت|بولینگ)$"))
 async def dice_cmd(client, message):
@@ -1328,7 +1413,7 @@ _FEAT_DEFAULTS = {
     "guard_on": False, "guard_links": False, "guard_chats": [], "guard_pv": False,
     "timed_save": True, "timed_saved_count": 0,
     "secretary_on": False, "secretary_text": "سلام 🌹 فعلاً در دسترس نیستم، به‌زودی پاسخ می‌دهم.",
-    "forcejoin_on": False, "forcejoin_chat": "",
+    "forcejoin_on": False, "forcejoin_chat": "", "forcejoin_last_error": "",
     "firstcomment_on": False, "firstcomment_text": "", "firstcomment_chats": [],
     "friends": [],
 }
@@ -1529,7 +1614,38 @@ async def wf_list(client, message):
 async def fj_toggle(client, message):
     feat["forcejoin_on"] = _onoff(message.matches[0].group(1)); fsave()
     extra = "" if feat["forcejoin_chat"] or not feat["forcejoin_on"] else "\n⚠️ کانال تنظیم نشده: `عضویت اجباری کانال @کانال`"
+    if feat.get("forcejoin_last_error"): extra += "\n" + feat["forcejoin_last_error"]
     await _safe_edit(message, f"📌 عضویت اجباری پیوی: {_yn(feat['forcejoin_on'])}{extra}")
+
+@app.on_message(filters.me & filters.regex(r"^عضویت اجباری وضعیت$"))
+async def fj_status(client, message):
+    t = (f"📌 **عضویت اجباری پیوی** {_yn(feat['forcejoin_on'])}\n"
+         f"📢 کانال/گروه: {feat['forcejoin_chat'] or '—'}")
+    if feat.get("forcejoin_last_error"): t += "\n\n" + feat["forcejoin_last_error"]
+    else: t += "\n\n✅ آخرین بررسی بدون خطا بوده"
+    await _safe_edit(message, t)
+
+@app.on_message(filters.me & filters.regex(r"^عضویت اجباری تست( .+)?$"))
+async def fj_test(client, message):
+    if not feat["forcejoin_chat"]:
+        return await _safe_edit(message, "❌ اول کانال را ثبت کنید: `عضویت اجباری کانال @کانال`")
+    target = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target = message.reply_to_message.from_user.id
+    else:
+        arg = (message.matches[0].group(1) or "").strip()
+        if arg:
+            try: target = (await client.get_users(arg.lstrip("@"))).id
+            except Exception as e: return await _safe_edit(message, f"❌ کاربر پیدا نشد: `{e}`")
+    if not target:
+        return await _safe_edit(message, "❌ روی پیام کسی ریپلای کنید یا بنویسید: `عضویت اجباری تست @user`")
+    chat = feat["forcejoin_chat"]
+    chat = int(chat) if re.fullmatch(r"-?\d+", chat) else chat
+    is_member, err = await _check_forcejoin_membership(client, chat, target)
+    if err:
+        await _safe_edit(message, f"🧪 نتیجه تست:\n{err}")
+    else:
+        await _safe_edit(message, f"🧪 نتیجه تست:\n{'✅ عضو است' if is_member else '❌ عضو نیست'}")
 
 @app.on_message(filters.me & filters.regex(r"^عضویت اجباری کانال .+"))
 async def fj_chat(client, message):
@@ -2135,6 +2251,21 @@ async def _nf_filter(client, message):
             return False
     return False
 
+async def _check_forcejoin_membership(client, chat, user_id):
+    """بررسی عضویت؛ خروجی: (is_member: bool|None, error_hint: str|None). None یعنی نتیجه قطعی نیست"""
+    try:
+        await client.get_chat_member(chat, user_id)
+        return True, None
+    except UserNotParticipant:
+        return False, None
+    except (ChatAdminRequired, ChannelPrivate) as e:
+        return None, ("⚠️ حساب شما باید ادمین کانال/گروه عضویت اجباری باشد، وگرنه بررسی عضویت دیگران ممکن نیست "
+                      f"(`{type(e).__name__}`)")
+    except PeerIdInvalid as e:
+        return None, f"⚠️ کانال/گروه شناسایی نشد؛ دوباره با `عضویت اجباری کانال ...` ثبت کنید (`{type(e).__name__}`)"
+    except Exception as e:
+        return None, f"⚠️ خطای نامشخص در بررسی عضویت: `{e}`"
+
 async def _nf_forcejoin(client, message):
     if not (feat["forcejoin_on"] and feat["forcejoin_chat"]): return False
     if message.chat.type != enums.ChatType.PRIVATE or not message.from_user: return False
@@ -2144,14 +2275,15 @@ async def _nf_forcejoin(client, message):
     if now - _fj_ok.get(u.id, 0) < 600: return False
     chat = feat["forcejoin_chat"]
     chat = int(chat) if re.fullmatch(r"-?\d+", chat) else chat
-    try:
-        await client.get_chat_member(chat, u.id)
+    is_member, err = await _check_forcejoin_membership(client, chat, u.id)
+    if err:
+        feat["forcejoin_last_error"] = err; fsave()
+        if now - _fj_notified.get("_admin", 0) > 3600:   # به خود شما، حداکثر هر ساعت یک‌بار
+            _fj_notified["_admin"] = now
+            print("⚠️ عضویت اجباری پیوی غیرفعال عمل کرد:", err)
+        return False   # نتیجه نامعلوم است؛ برای جلوگیری از قفل‌شدن اشتباهیِ پیوی، پیام را نمی‌بندیم
+    if is_member:
         _fj_ok[u.id] = now
-        return False
-    except UserNotParticipant:
-        pass
-    except Exception as e:
-        print("⚠️ بررسی عضویت اجباری ناموفق:", e)
         return False
     if now - _fj_notified.get(u.id, 0) > 600:
         _fj_notified[u.id] = now
