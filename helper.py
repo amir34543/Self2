@@ -24,7 +24,7 @@ except ImportError:
 
 # توکن را در Railway → Variables با نام HELPER_BOT_TOKEN بگذار (پیشنهادی)
 # یا مستقیم به‌جای PUT_TOKEN_HERE بنویس
-TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "8895709305:AAEUAYHr1nKKk46wpQaAzC98mWa3ChKUfis"
+TOKEN = os.environ.get("HELPER_BOT_TOKEN") or "PUT_TOKEN_HERE"
 API_ID = 35656061
 API_HASH = "b37f2596516bc0439bf505d1d230395c"
 
@@ -217,6 +217,7 @@ def get_categories_keyboard(uid):
         ("🎩 ترفند", "trick"), ("🎲 سرگرمی", "fun"),
         ("🎨 فرمت متن", "format"), ("🔒 قفل پیوی", "lock"),
         ("🛡 حفاظت", "protect"), ("✏️ ویرایش", "edit"),
+        ("⏰ ساعت نام", "clock"),
     ]
     rows = [[btn("⚡ تنظیمات زنده سلف", f"p:live:{uid}", S("s"))]]
     for i in range(0, len(c), 2):
@@ -261,6 +262,9 @@ PAGE_GRIDS = {
 }
 # هر بخش به کدام صفحه برمی‌گردد (پیش‌فرض: صفحه ۱)
 CAT_PAGE = {k: pg for pg, grid in PAGE_GRIDS.items() for row in grid for _, k in row}
+CAT_PAGE.setdefault("clock", 1)
+# صفحه‌هایی که باید به یک دسته برگردند (نه به شماره صفحه) — زیرصفحه‌های فونت
+CAT_BACK_TO_CAT = {"fontclock": "clock", "fonttext": "clock"}
 
 def get_page_keyboard(uid, page):
     if page == 1:
@@ -744,6 +748,90 @@ CAT_TEXTS.update({
 <code>ساخت ویدیو گرد</code> — ریپلای روی یک ویدیو یا گیف؛ به ویدیو گرد تلگرام تبدیل می‌شود (حداکثر ۶۰ ثانیه)""",
 })
 
+CAT_TEXTS.update({
+"clock": """⏰ <b>ساعت نام</b>
+
+نمایش ساعت به‌وقت تهران، کنار اسم شما در تلگرام (دائم به‌روزرسانی می‌شود)
+
+<b>دستورات قابل کپی:</b>
+<code>تایم روشن</code> / <code>تایم خاموش</code>
+<code>ساعت نام روشن</code> / <code>ساعت نام خاموش</code> (دستور جایگزین، همان کار را می‌کند)
+<code>لیست فونت</code> — پیش‌نمایش ۳۰ فونت ساعت
+<code>تنظیم فونت 1</code> تا <code>تنظیم فونت 30</code>
+
+ℹ️ همین قابلیت داخل بخش «🪄 پروفایل» هم هست؛ اینجا یک میان‌بر جداست""",
+
+"fontclock": """🕐 <b>فونت‌های ساعت (۳۰ فونت)</b>
+
+عدد فونت را با <code>تنظیم فونت شماره</code> ست کنید، مثلاً <code>تنظیم فونت 12</code>
+
+1 - 𝟏𝟐:𝟑𝟒  (بولد)
+2 - 𝟭𝟮:𝟯𝟰  (سنس‌بولد)
+3 - １２:３４  (تمام‌عرض)
+4 - 𝟣𝟤:𝟥𝟦  (سنس)
+5 - 𝟙𝟚:𝟛𝟜  (دابل‌استراک)
+6 - 12̴:̴34̴  (خط‌دار کلاسیک)
+7 - 𝟷𝟸:𝟹𝟺  (مونو‌اسپیس)
+8 - ¹²:³⁴  (بالانویس)
+9 - ₁₂:₃₄  (پایین‌نویس)
+10 - ①②:③④  (دایره‌ای)
+11 - ❶❷:❸❹  (دایره پر)
+12 - ⑴⑵:⑶⑷  (پرانتزی)
+13 - ⒈⒉:⒊⒋  (نقطه‌دار)
+14 - 1̲2̲:3̲4̲  (زیرخط)
+15 - 1̳2̳:3̳4̳  (زیرخط دوبل)
+16 - 1̶2̶:3̶4̶  (خط‌خورده)
+17 - 1̅2̅:3̅4̅  (روخط)
+18 - 1̿2̿:3̿4̿  (روخط دوبل)
+19 - 1̃2̃:3̃4̃  (مواج)
+20 - 1̂2̂:3̂4̂  (سقفی)
+21 - 1̊2̊:3̊4̊  (حلقه‌دار)
+22 - 1̇2̇:3̇4̇  (نقطه بالا)
+23 - 1̣2̣:3̣4̣  (نقطه پایین)
+24 - 1̄2̄:3̄4̄  (ماکرون)
+25 - 1̱2̱:3̱4̱  (زیرخط ضخیم)
+26 - 1̀2̀:3̀4̀  (گریو)
+27 - 1́2́:3́4́  (آکوت)
+28 - 1̈2̈:3̈4̈  (دیارز)
+29 - 1̆2̆:3̆4̆  (بروه)
+30 - 1̌2̌:3̌4̌  (کارون)""",
+
+"fonttext": """🔤 <b>فونت‌های متن (۳۰ فونت)</b>
+
+با <code>قلم شماره متن</code> استفاده کنید، مثلاً <code>قلم 9 سلام</code>
+
+1. ꧁ 𝗣𝗲𝗿𝘀𝗶𝗮𝗻 ꧂
+2. ✦ 𝘗𝘦𝘳𝘴𝘪𝘢𝘯 ✦
+3. ༺ ℙ𝕖𝕣𝕤𝕚𝕒𝕟 ༻
+4. 「 ᴘᴇʀsɪᴀɴ 」
+5. ★ Ⓟⓔⓡⓢⓘⓐⓝ ★
+6. 『 𝕻𝖊𝖗𝖘𝖎𝖆𝖓 』
+7. ◈ 𝙋𝙚𝙧𝙨𝙞𝙖𝙣 ◈
+8. ♦ 𝙿𝚎𝚛𝚜𝚒𝚊𝚗 ♦
+9. ☾ 𝖯𝖾𝗋𝗌𝗂𝖺𝗇 ☽
+10. ▧ 𝐏𝐞𝐫𝐬𝐢𝐚𝐧 ▧
+11. ▣ 𝑃𝑒𝑟𝑠𝑖𝑎𝑛 ▣
+12. ❖ 𝑷𝒆𝒓𝒔𝒊𝒂𝒏 ❖
+13. ⟡ 𝒫ℯ𝓇𝓈𝒾𝒶𝓃 ⟡
+14. ꒰ 𝓟𝓮𝓻𝓼𝓲𝓪𝓷 ꒱
+15. ⚡ 𝔓𝔢𝔯𝔰𝔦𝔞𝔫 ⚡
+16. 🔥 Ｐｅｒｓｉａｎ 🔥
+17. ❁ P̲e̲r̲s̲i̲a̲n̲ ❁
+18. ☆ P̳e̳r̳s̳i̳a̳n̳ ☆
+19. ⌈ P̶e̶r̶s̶i̶a̶n̶ ⌉
+20. » P̅e̅r̅s̅i̅a̅n̅ «
+21. ⊰ P̃ẽr̃s̃ĩãñ ⊱
+22. ◇ P̂êr̂ŝîân̂ ◇
+23. ✧ P̊e̊r̊s̊i̊ån̊ ✧
+24. ⋆ Ṗėṙṡi̇ȧṅ ⋆
+25. ⟦ P̣ẹṛṣịạṇ ⟧
+26. ☙ P̄ēr̄s̄īān̄ ❧
+27. ➤ P̀èr̀s̀ìàǹ ➤
+28. ⁘ Ṕéŕśíáń ⁘
+29. ✵ P̈ër̈s̈ïän̈ ✵
+30. ꧁P̆ĕr̆s̆ĭăn̆꧂""",
+})
+
 # ==============================================================================
 # دکمه‌های شیشه‌ای (روشن/خاموش سریع) زیر دستورات هر بخش
 # هر مورد: (برچسب، گروه در state، کلید در state، نام اکشن)
@@ -774,6 +862,7 @@ GLASS = {
         ("حذف خودکار پیام‌ها", None, "auto_delete", "toggle_autodel")]},
     "profile": {"items": [
         ("ساعت در اسم", None, "time_on", "toggle_time")]},
+    "clock": {"items": [("ساعت در اسم", None, "time_on", "toggle_time")]},
     "firstcomment": {"items": [("کامنت اول", None, "firstcomment_on", "toggle_firstcomment")]},
     "wfilter": {"items": [("فیلتر کلمات", None, "filter_on", "toggle_filter"),
                           ("پیوی", None, "filter_pv", "toggle_filterpv"),
@@ -815,14 +904,26 @@ def get_glass_keyboard(uid, cat, state):
     rows.append([btn("🔙 بازگشت به پنل", f"p:pg:{uid}:{CAT_PAGE.get(cat, 1)}", S("p"))])
     return InlineKeyboardMarkup(rows)
 
+CAT_EXTRA_NAV = {"clock": [("🕐 فونت ساعت", "fontclock"), ("🔤 فونت متن", "fonttext")]}
+
+def _back_button(uid, cat):
+    if cat in CAT_BACK_TO_CAT:
+        return btn("🔙 بازگشت", f"p:cat:{uid}:{CAT_BACK_TO_CAT[cat]}", S("p"))
+    return btn("🔙 بازگشت", f"p:pg:{uid}:{CAT_PAGE.get(cat, 1)}", S("p"))
+
 def cat_view(uid, cat, state):
     """(متن، کیبورد) صفحه یک بخش؛ اگر دکمه شیشه‌ای دارد زیر دستورات می‌آید"""
     text = CAT_TEXTS.get(cat)
     if text is None:
         return None, None
     if cat in GLASS:
-        return text + GLASS_HEADER, get_glass_keyboard(uid, cat, state)
-    return text, InlineKeyboardMarkup([[btn("🔙 بازگشت", f"p:pg:{uid}:{CAT_PAGE.get(cat, 1)}", S("p"))]])
+        kb = get_glass_keyboard(uid, cat, state)
+        rows = kb.rows[:-1]   # ردیف بازگشتِ پیش‌فرض را برمی‌داریم تا override درست جایگزین شود
+        for label, target in CAT_EXTRA_NAV.get(cat, []):
+            rows.append([btn(label, f"p:cat:{uid}:{target}", S("p"))])
+        rows.append([_back_button(uid, cat)])
+        return text + GLASS_HEADER, InlineKeyboardMarkup(rows)
+    return text, InlineKeyboardMarkup([[_back_button(uid, cat)]])
 
 def build_account_text(state):
     if not state_online(state):
