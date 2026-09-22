@@ -19,7 +19,7 @@ async def safe_edit_message(message, *args, **kwargs):
 user_temp_codes = {}
 active_clients = {}
 BOT_TOKEN = "8868043854:AAHblyKRa-DbGHefUp7q8_Zw675JTfBdgBw"
-ADMIN_ID = 7845464086
+ADMIN_ID = 8953488723
 
 # تنظیمات منوی جدید
 # یوزرنیم‌ها را بدون @ وارد کنید
