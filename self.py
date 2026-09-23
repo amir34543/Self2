@@ -116,8 +116,37 @@ banner_interval_min = 5
 last_banner = 0
 START_TIME = time.time()
 
-user_time_status = {}
-user_original_names = {}
+# ساعت در اسم: وضعیت باید روی دیسک ذخیره شود وگرنه بعد از هر ری‌استارت
+# سلف، نام اصلی کاربر فراموش می‌شود و با فعال‌سازی دوباره، ساعت روی ساعت قبلی
+# چسبانده می‌شود (نام بی‌نهایت بزرگ می‌شود و آپدیت پروفایل با خطا شکست می‌خورد
+# بدون این‌که به کاربر نمایش داده شود — همان «دکمه کار نمی‌کند»)
+TIME_STATE_FILE = "clock_state.json"
+_time_state = jload(TIME_STATE_FILE, {"status": {}, "original": {}})
+user_time_status = {int(k): v for k, v in _time_state.get("status", {}).items()}
+user_original_names = {int(k): v for k, v in _time_state.get("original", {}).items()}
+
+def _save_time_state():
+    jsave(TIME_STATE_FILE, {
+        "status": {str(k): v for k, v in user_time_status.items()},
+        "original": {str(k): v for k, v in user_original_names.items()},
+    })
+
+def _clean_original_name(name):
+    """اگر نام فعلی از قبل به‌اشتباه شامل ساعت باشد (مثلاً بعد از ری‌استارت)، آن را پاک می‌کند."""
+    import unicodedata
+    name = (name or "").strip()
+    if not name:
+        return name
+    parts = name.split(" ")
+    while parts:
+        core = "".join(ch for ch in parts[-1] if unicodedata.category(ch) != "Mn").replace(":", "")
+        if core and all(ch.isdigit() for ch in core):
+            parts.pop()
+        else:
+            break
+    cleaned = " ".join(parts).strip()
+    return cleaned if cleaned else name
+
 user_fonts = {int(k): v for k, v in jload("fonts.json", {}).items()}
 auto_reactions = jload("mmauto_reactions.json", {})
 auto_replies = jload("auto_replies.json", {})
@@ -503,16 +532,31 @@ async def _apply_time_toggle(client, message, on):
     global user_fonts
     uid = message.from_user.id
     if on:
-        user_time_status[uid] = True
-        user_original_names.setdefault(uid, message.from_user.first_name or "")
+        base = user_original_names.get(uid) or _clean_original_name(message.from_user.first_name or "")
         fid = user_fonts.get(uid, 1)
-        await app.update_profile(first_name=f"{user_original_names.get(uid)} {fa_time_str(fid)}")
+        new_name = f"{base} {fa_time_str(fid)}".strip()[:64]
+        try:
+            await app.update_profile(first_name=new_name)
+        except FloodWait as e:
+            return await message.edit(f"❌ محدودیت تلگرام (Flood Wait): {e.value} ثانیه دیگر دوباره امتحان کنید")
+        except Exception as e:
+            return await message.edit(f"❌ خطا در تغییر نام:\n`{e}`")
+        user_time_status[uid] = True
+        user_original_names[uid] = base
+        _save_time_state()
         await message.edit(f"✅ ساعت در اسم (تایم) روشن شد\n⏰ {fa_time_str(fid)}")
     else:
+        base = user_original_names.get(uid, message.from_user.first_name or "")
+        try:
+            await app.update_profile(first_name=base)
+        except FloodWait as e:
+            user_time_status[uid] = False
+            _save_time_state()
+            return await message.edit(f"⚠️ خاموش شد، ولی به‌خاطر Flood Wait نام هنوز آپدیت نشده ({e.value} ثانیه دیگر خودش درست می‌شود)")
+        except Exception:
+            pass
         user_time_status[uid] = False
-        if uid in user_original_names:
-            try: await app.update_profile(first_name=user_original_names[uid])
-            except Exception: pass
+        _save_time_state()
         await message.edit("✅ ساعت در اسم (تایم) خاموش شد")
 
 @app.on_message(filters.me & filters.command("تایم", prefixes="") & filters.regex(r"^تایم (روشن|خاموش)$"))
@@ -973,26 +1017,157 @@ async def download_from_link(client, message):
 
 @app.on_message(filters.me & filters.command("اینستا", prefixes=""))
 async def instagram_download_command(client, message):
-    if len(message.command) < 2: return await message.edit("❌ لینک نامعتبر")
+    if len(message.command) < 2: return await message.edit("❌ `اینستا لینک`")
     u = message.command[1].strip()
-    if not u.startswith(("https://www.instagram.com/", "https://instagram.com/")):
+    if not u.startswith(("https://www.instagram.com/", "https://instagram.com/", "https://instagr.am/")):
         return await message.edit("❌ لینک نامعتبر")
     m = await message.edit("🔄 در حال دریافت...")
+    # نوع محتوا از روی خود لینک تشخیص داده می‌شود (پست/ریلز/استوری)
+    if "/reel/" in u or "/reels/" in u:
+        api_type = "reel"
+    elif "/stories/" in u:
+        api_type = "story"
+    else:
+        api_type = "post"
     try:
-        r = requests.get(f"https://api.fast-creat.ir/instagram?apikey=8000978149:uJC3mxBncq9ELPN@Api_ManagerRoBOT&type=post&url={urllib.parse.quote(u)}").json()
-        if not r.get("ok"): return await m.edit("❌ خطا از API")
-        p = r["result"]["result"][0]
-        if p.get("is_video"):
-            v = requests.get(p["video_url"], timeout=60).content
-            with open("t.mp4", "wb") as f: f.write(v)
-            await app.send_video(message.chat.id, "t.mp4", caption=p.get("caption", "")); os.remove("t.mp4")
+        resp = requests.get(
+            "https://api.fast-creat.ir/instagram",
+            params={"apikey": "8000978149:uJC3mxBncq9ELPN@Api_ManagerRoBOT", "type": api_type, "url": u},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        r = resp.json()
+        if not r.get("ok"):
+            err = r.get("message") or r.get("error") or "پاسخ نامعتبر از سرور"
+            return await m.edit(f"❌ خطا از API: `{err}`")
+        items = ((r.get("result") or {}).get("result")) or []
+        if not items:
+            return await m.edit("❌ چیزی برای دانلود پیدا نشد (لینک خصوصی/نامعتبر است؟)")
+
+        files = []
+        for i, p in enumerate(items):
+            try:
+                if p.get("is_video") and p.get("video_url"):
+                    path = f"ig_{message.id}_{i}.mp4"
+                    with open(path, "wb") as f:
+                        f.write(requests.get(p["video_url"], timeout=60).content)
+                    files.append(("video", path))
+                else:
+                    img_url = p.get("video_img") or p.get("display_url") or p.get("image_url")
+                    if not img_url:
+                        continue
+                    path = f"ig_{message.id}_{i}.jpg"
+                    with open(path, "wb") as f:
+                        f.write(requests.get(img_url, timeout=30).content)
+                    files.append(("photo", path))
+            except Exception:
+                continue
+
+        if not files:
+            return await m.edit("❌ دانلود فایل‌ها ناموفق بود")
+
+        caption = items[0].get("caption") or ""
+        if len(files) == 1:
+            kind, path = files[0]
+            if kind == "video":
+                await app.send_video(message.chat.id, path, caption=caption)
+            else:
+                await app.send_photo(message.chat.id, path, caption=caption)
         else:
-            im = requests.get(p["video_img"], timeout=30).content
-            with open("t.jpg", "wb") as f: f.write(im)
-            await app.send_photo(message.chat.id, "t.jpg", caption=p.get("caption", "")); os.remove("t.jpg")
+            from pyrogram.types import InputMediaPhoto, InputMediaVideo
+            media = []
+            for idx, (kind, path) in enumerate(files):
+                cap = caption if idx == 0 else ""
+                media.append(InputMediaVideo(path, caption=cap) if kind == "video" else InputMediaPhoto(path, caption=cap))
+            await app.send_media_group(message.chat.id, media)
+
+        for _, path in files:
+            try: os.remove(path)
+            except Exception: pass
         await m.delete()
-    except Exception:
-        await m.edit("❌ خطا در دانلود")
+    except requests.exceptions.RequestException as e:
+        await m.edit(f"❌ خطا در اتصال به سرور دانلودر:\n`{e}`")
+    except Exception as e:
+        await m.edit(f"❌ خطا در دانلود:\n`{e}`")
+
+@app.on_message(filters.me & filters.command("تیکتاک", prefixes=""))
+async def tiktok_download_command(client, message):
+    if len(message.command) < 2: return await message.edit("❌ `تیکتاک لینک`")
+    u = message.command[1].strip()
+    if "tiktok.com" not in u:
+        return await message.edit("❌ لینک نامعتبر")
+    m = await message.edit("🔄 در حال دریافت...")
+    path = f"tt_{message.id}.mp4"
+    try:
+        resp = requests.get("https://www.tikwm.com/api/", params={"url": u}, timeout=30)
+        resp.raise_for_status()
+        r = resp.json()
+        data = r.get("data") or {}
+        video_url = data.get("play") or data.get("hdplay") or data.get("wmplay")
+        if r.get("code") != 0 or not video_url:
+            err = r.get("msg") or "لینک پیدا نشد"
+            return await m.edit(f"❌ خطا از API: `{err}`")
+        if not video_url.startswith("http"):
+            video_url = "https://www.tikwm.com" + video_url
+        with open(path, "wb") as f:
+            f.write(requests.get(video_url, timeout=60).content)
+        caption = data.get("title") or ""
+        await app.send_video(message.chat.id, path, caption=caption)
+        await m.delete()
+    except requests.exceptions.RequestException as e:
+        await m.edit(f"❌ خطا در اتصال به سرور دانلودر:\n`{e}`")
+    except Exception as e:
+        await m.edit(f"❌ خطا در دانلود:\n`{e}`")
+    finally:
+        if os.path.exists(path):
+            try: os.remove(path)
+            except Exception: pass
+
+@app.on_message(filters.me & filters.command("یوتیوب", prefixes=""))
+async def youtube_download_command(client, message):
+    if len(message.command) < 2: return await message.edit("❌ `یوتیوب لینک`")
+    u = message.command[1].strip()
+    if "youtube.com" not in u and "youtu.be" not in u:
+        return await message.edit("❌ لینک نامعتبر")
+    try:
+        import yt_dlp
+    except ImportError:
+        return await message.edit(
+            "❌ کتابخانه `yt-dlp` نصب نیست.\nروی سرور اجرا کنید:\n`pip install -U yt-dlp`"
+        )
+    m = await message.edit("🔄 در حال دریافت اطلاعات ویدیو...")
+    out_tmpl = f"yt_{message.id}.%(ext)s"
+    ydl_opts = {
+        "format": "best[ext=mp4][height<=720]/best[height<=720]/best",
+        "outtmpl": out_tmpl,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+    }
+    final_path = None
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(u, download=False)
+            duration = info.get("duration") or 0
+            if duration and duration > 1200:  # بیش از ۲۰ دقیقه دانلود نشود
+                return await m.edit("❌ ویدیو طولانی‌تر از ۲۰ دقیقه است و دانلود نمی‌شود")
+            await m.edit(f"⬇️ در حال دانلود: {info.get('title', '')}")
+            ydl.download([u])
+            final_path = ydl.prepare_filename(info)
+        if not final_path or not os.path.exists(final_path):
+            return await m.edit("❌ دانلود ناموفق بود")
+        size_mb = os.path.getsize(final_path) / (1024 * 1024)
+        if size_mb > 1900:
+            return await m.edit("❌ حجم فایل بیش از حد مجاز تلگرام است")
+        await m.edit("📤 در حال ارسال...")
+        await app.send_video(message.chat.id, final_path, caption=info.get("title", ""))
+        await m.delete()
+    except Exception as e:
+        await m.edit(f"❌ خطا در دانلود:\n`{e}`")
+    finally:
+        if final_path and os.path.exists(final_path):
+            try: os.remove(final_path)
+            except Exception: pass
 
 # ================== 💾 ذخیره‌ساز ==================
 @app.on_message(filters.me & filters.command("سیو", prefixes=""))
@@ -2615,14 +2790,27 @@ async def execute_panel_action(item):
             for k in lock_settings: lock_settings[k] = False
         elif name == "time_on":
             me = await app.get_me()
-            user_time_status[me.id] = True
-            user_original_names.setdefault(me.id, me.first_name or "")
-            await app.update_profile(first_name=f"{user_original_names.get(me.id)} {fa_time_str(user_fonts.get(me.id, 1))}")
+            base = user_original_names.get(me.id) or _clean_original_name(me.first_name or "")
+            fid = user_fonts.get(me.id, 1)
+            try:
+                await app.update_profile(first_name=f"{base} {fa_time_str(fid)}".strip()[:64])
+            except Exception:
+                pass
+            else:
+                # فقط در صورت موفقیت واقعی وضعیت را روشن ثبت کن، وگرنه دکمه دوباره
+                # به کاربر «روشن» نشان می‌دهد در حالی که نام واقعاً تغییر نکرده
+                user_time_status[me.id] = True
+                user_original_names[me.id] = base
+                _save_time_state()
         elif name == "time_off":
             me = await app.get_me()
+            base = user_original_names.get(me.id, me.first_name or "")
+            try:
+                await app.update_profile(first_name=base)
+            except Exception:
+                pass
             user_time_status[me.id] = False
-            if me.id in user_original_names:
-                await app.update_profile(first_name=user_original_names[me.id])
+            _save_time_state()
     except Exception: pass
     try: last_action_ts = max(last_action_ts, float(item.get("ts", 0)))
     except Exception: pass
@@ -2653,14 +2841,23 @@ async def online_loop():
 
 async def time_loop():
     while True:
+        extra_sleep = 0
         try:
             me = await app.get_me()
             if user_time_status.get(me.id):
                 fid = user_fonts.get(me.id, 1)
-                orig = user_original_names.get(me.id, me.first_name or "")
-                await app.update_profile(first_name=f"{orig} {fa_time_str(fid)}")
-        except Exception: pass
-        await asyncio.sleep(60)
+                orig = user_original_names.get(me.id) or _clean_original_name(me.first_name or "")
+                try:
+                    await app.update_profile(first_name=f"{orig} {fa_time_str(fid)}".strip()[:64])
+                    if user_original_names.get(me.id) != orig:
+                        user_original_names[me.id] = orig
+                        _save_time_state()
+                except FloodWait as e:
+                    # به‌جای کوبیدن هر ۶۰ ثانیه به سقف Flood Wait، صبر می‌کنیم
+                    extra_sleep = min(e.value, 300)
+        except Exception:
+            pass
+        await asyncio.sleep(60 + extra_sleep)
 
 async def banner_loop():
     global last_banner
