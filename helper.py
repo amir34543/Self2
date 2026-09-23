@@ -904,7 +904,8 @@ def _glass_on(state, group, key):
         s = s.get(group, {})
     return bool(s.get(key))
 
-def get_glass_keyboard(uid, cat, state):
+def _glass_rows(uid, cat, state):
+    """ردیف‌های دکمه‌های روشن/خاموش (بدون ردیف بازگشت)"""
     cfg = GLASS[cat]
     rows, row = [], []
     for label, group, key, action in cfg["items"]:
@@ -916,6 +917,10 @@ def get_glass_keyboard(uid, cat, state):
         rows.append(row)
     if cfg.get("reset"):
         rows.append([btn(cfg["reset"][1], f"p:tg:{uid}:{cfg['reset'][0]}:c_{cat}", S("d"))])
+    return rows
+
+def get_glass_keyboard(uid, cat, state):
+    rows = _glass_rows(uid, cat, state)
     rows.append([btn("🔙 بازگشت به پنل", f"p:pg:{uid}:{CAT_PAGE.get(cat, 1)}", S("p"))])
     return InlineKeyboardMarkup(rows)
 
@@ -932,8 +937,7 @@ def cat_view(uid, cat, state):
     if text is None:
         return None, None
     if cat in GLASS:
-        kb = get_glass_keyboard(uid, cat, state)
-        rows = kb.rows[:-1]   # ردیف بازگشتِ پیش‌فرض را برمی‌داریم تا override درست جایگزین شود
+        rows = _glass_rows(uid, cat, state)   # قبلاً kb.rows بود که در Pyrogram وجود ندارد و کرش می‌کرد
         for label, target in CAT_EXTRA_NAV.get(cat, []):
             rows.append([btn(label, f"p:cat:{uid}:{target}", S("p"))])
         rows.append([_back_button(uid, cat)])
@@ -1078,6 +1082,14 @@ async def inline_query_handler(client, inline_query):
 
 @app.on_callback_query()
 async def callback_query_handler(client, cq):
+    try:
+        await _callback_query_handler(client, cq)
+    except Exception as e:
+        logging.exception("خطا در هندلر دکمه‌ها")
+        try: await cq.answer(f"⚠️ خطا: {str(e)[:150]}", show_alert=True)
+        except Exception: pass
+
+async def _callback_query_handler(client, cq):
     data = cq.data or ""
     parts = data.split(":")
     if len(parts) < 3 or parts[0] != "p" or parts[2] != str(cq.from_user.id):
