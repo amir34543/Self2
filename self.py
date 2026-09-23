@@ -34,7 +34,13 @@ if len(sys.argv) > 3: API_ID = int(sys.argv[3])
 if len(sys.argv) > 4: API_HASH = sys.argv[4]
 
 session_name = f"sessions/{USER_ID}" if USER_ID else "self"
-app = Client(session_name, api_id=API_ID, api_hash=API_HASH)
+# اگر متغیر SESSION_STRING (در Railway → Variables) ست باشد، لاگین از همان خوانده می‌شود
+# و با هر دیپلوی دیگر نیازی به لاگین مجدد نیست (فایل .session لازم نیست)
+SESSION_STRING = os.environ.get("SESSION_STRING")
+if SESSION_STRING:
+    app = Client("self", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
+else:
+    app = Client(session_name, api_id=API_ID, api_hash=API_HASH)
 
 # --- کش get_me: هر get_me یک درخواست users.GetFullUser است و فراخوانی مکرر FLOOD_WAIT می‌دهد ---
 _orig_get_me = app.get_me
@@ -2950,7 +2956,7 @@ if __name__ == "__main__":
     print("🧩 Persian Gulf Self | build panel-timed-r10 |", os.path.abspath(__file__))
     if USER_ID: print(f"✅ Persian Gulf Self برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
     else: print("⚠️ سلف‌بات در حالت معمولی اجرا شد")
-    if not USER_ID and not os.path.exists("self.session"):
+    if not USER_ID and not SESSION_STRING and not os.path.exists("self.session"):
         print("❌ بدون آرگومان و بدون فایل self.session اجرا شد؛ این پروسه لازم نیست (سلف‌بات را هلپر اجرا می‌کند). خروج.")
         sys.exit(0)
     loop = asyncio.get_event_loop()
