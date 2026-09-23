@@ -37,6 +37,12 @@ STATE_FILE = "selfbot_state.json"
 ACTIONS_FILE = "panel_actions.json"
 BANNER_FILE = "panel_banner.png"   # توسط self.py ساخته می‌شود
 
+# چندحسابی: هر اکانت فایل وضعیت/دستورات/بنر مخصوص خودش را دارد (قبلاً همه روی یک فایل مشترک می‌نوشتند)
+import contextvars
+_CUR_UID = contextvars.ContextVar("cur_uid", default=None)
+def state_file_for(uid): return f"selfbot_state_{uid}.json"
+def actions_file_for(uid): return f"panel_actions_{uid}.json"
+
 TOGGLE_MAP = {
     "online": "toggle_online", "taglogger": "toggle_taglogger",
     "antilogin": "toggle_antilogin", "afk": "toggle_afk",
@@ -57,20 +63,32 @@ TOGGLE_MAP = {
 }
 
 # ------------------------- ابزار فایل -------------------------
-def load_self_state():
+def _read_json(path):
     try:
-        if os.path.exists(STATE_FILE):
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception:
         pass
     return None
 
+def load_self_state(uid=None):
+    """وضعیت سلفِ همان کاربری که پنل را باز کرده (uid از هندلر جاری گرفته می‌شود)"""
+    uid = uid or _CUR_UID.get()
+    if uid:
+        st = _read_json(state_file_for(uid))
+        if st: return st
+        legacy = _read_json(STATE_FILE)      # سازگاری با self.py قدیمی
+        if legacy and (legacy.get("account") or {}).get("id") == uid: return legacy
+        return None
+    return _read_json(STATE_FILE)
+
 def queue_action(user_id, action):
+    path = actions_file_for(user_id)
     items = []
     try:
-        if os.path.exists(ACTIONS_FILE):
-            with open(ACTIONS_FILE, "r", encoding="utf-8") as f:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
                 raw = f.read().strip()
             items = json.loads(raw) if raw else []
             if not isinstance(items, list): items = []
@@ -78,10 +96,10 @@ def queue_action(user_id, action):
         items = []
     ts = time.time()
     items.append({"user_id": user_id, "action": action, "ts": ts})
-    tmp = ACTIONS_FILE + ".tmp"
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(items, f, ensure_ascii=False)
-    os.replace(tmp, ACTIONS_FILE)
+    os.replace(tmp, path)
     return ts
 
 def state_online(state):
@@ -105,7 +123,10 @@ BRAND_FOOTER = "\n\n💎 <i>" + BRAND + "</i>"
 def brand(text): return text + BRAND_FOOTER
 
 BANNER_FID_FILE = "panel_banner_fid.json"
-_banner = {"fid": None, "owner": None, "sig": None}
+_banner_map = {}   # {str(owner_id): {"fid":..., "sig":...}}
+
+def get_banner_fid(uid):
+    return (_banner_map.get(str(uid)) or {}).get("fid")
 
 def load_banner_cache():
     try:
@@ -113,7 +134,10 @@ def load_banner_cache():
             with open(BANNER_FID_FILE, "r", encoding="utf-8") as f:
                 d = json.load(f)
             if isinstance(d, dict):
-                _banner.update({k: d.get(k) for k in ("fid", "owner", "sig")})
+                if isinstance(d.get("owners"), dict):
+                    _banner_map.update(d["owners"])
+                elif d.get("fid") and d.get("owner"):      # فرمت قدیمی تک‌کاربره
+                    _banner_map[str(d["owner"])] = {"fid": d["fid"], "sig": d.get("sig")}
     except Exception:
         pass
 
@@ -121,7 +145,7 @@ def save_banner_cache():
     try:
         tmp = BANNER_FID_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(_banner, f)
+            json.dump({"owners": _banner_map}, f)
         os.replace(tmp, BANNER_FID_FILE)
     except Exception:
         pass
@@ -1065,12 +1089,13 @@ async def banner_receiver(client, message):
     cap = message.caption or ""
     if not cap.startswith("PANELBANNER|") or not message.from_user:
         return
-    st = load_self_state()
+    sender = message.from_user.id
+    st = load_self_state(sender)
     owner = ((st or {}).get("account") or {}).get("id")
-    if not owner or message.from_user.id != owner:
+    if not owner or sender != owner:
         logging.warning("🖼 بنر رد شد: فرستنده مجاز نیست یا وضعیت سلف موجود نیست")
         return
-    _banner.update(fid=message.photo.file_id, owner=owner, sig=cap.split("|", 1)[1])
+    _banner_map[str(owner)] = {"fid": message.photo.file_id, "sig": cap.split("|", 1)[1]}
     save_banner_cache()
     logging.info("🖼 بنر پنل دریافت و ذخیره شد")
     try: await message.delete()
@@ -1080,13 +1105,20 @@ async def banner_receiver(client, message):
 async def inline_query_handler(client, inline_query):
     q = inline_query.query.strip().lower()
     uid = inline_query.from_user.id
+    _CUR_UID.set(uid)
+    if q == "paneltext":     # پنل بدون عکس؛ برای چت‌هایی که ارسال عکس در آن‌ها ممنوع است
+        await inline_query.answer([InlineQueryResultArticle(
+            id="1", title="🎛 پنل (متنی)", description="بدون بنر",
+            input_message_content=InputTextMessageContent(brand(MAIN_TEXT), parse_mode=enums.ParseMode.HTML),
+            reply_markup=get_main_keyboard(uid))], cache_time=5, is_personal=True)
+        return
     if q == "panel":
         article = InlineQueryResultArticle(
             id="1", title="🎛 پنل مدیریت Persian Gulf Self",
             description="حساب کاربری + تنظیمات کامل سلف",
             input_message_content=InputTextMessageContent(brand(MAIN_TEXT), parse_mode=enums.ParseMode.HTML),
             reply_markup=get_main_keyboard(uid))
-        fid = _banner["fid"] if _banner.get("owner") == uid else None
+        fid = get_banner_fid(uid)
         if fid:
             try:
                 await inline_query.answer(
@@ -1125,6 +1157,7 @@ async def _callback_query_handler(client, cq):
         return
     action = parts[1]
     uid = int(parts[2])
+    _CUR_UID.set(uid)
     arg = parts[3] if len(parts) > 3 else ""
     extra = parts[4] if len(parts) > 4 else ""
 
