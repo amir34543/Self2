@@ -1015,6 +1015,104 @@ async def download_from_link(client, message):
     except Exception as e:
         await message.edit(f"❌ `{e}`")
 
+# ---------- اینستاگرام: API اصلی + فالبک yt-dlp ----------
+IG_API_URL = "https://api.fast-creat.ir/instagram"
+IG_API_KEY = os.environ.get("IG_API_KEY") or "8000978149:uJC3mxBncq9ELPN@Api_ManagerRoBOT"
+IG_COOKIES_FILE = "instagram_cookies.txt"   # اختیاری: کوکی اینستاگرام (فرمت Netscape) برای yt-dlp
+_IG_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+def _ig_walk(node, out):
+    """هر آیتمی که video_url یا عکس دارد را از هر ساختار JSON بیرون می‌کشد"""
+    if isinstance(node, dict):
+        vid = node.get("video_url")
+        if not vid and isinstance(node.get("url"), str) and ".mp4" in node["url"].split("?")[0]:
+            vid = node["url"]
+        if isinstance(vid, str) and vid.startswith("http"):
+            out.append(("video", vid)); return
+        img = node.get("display_url") or node.get("image_url") or node.get("photo_url") or node.get("thumbnail_url")
+        if isinstance(img, str) and img.startswith("http"):
+            out.append(("photo", img)); return
+        for v in node.values():
+            _ig_walk(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            if isinstance(v, str) and v.startswith("http"):
+                base = v.split("?")[0].lower()
+                if base.endswith(".mp4"): out.append(("video", v))
+                elif base.endswith((".jpg", ".jpeg", ".png", ".webp")): out.append(("photo", v))
+            else:
+                _ig_walk(v, out)
+
+def _ig_find_caption(node):
+    if isinstance(node, dict):
+        c = node.get("caption")
+        if isinstance(c, str) and c.strip(): return c
+        if isinstance(c, dict) and isinstance(c.get("text"), str): return c["text"]
+        for v in node.values():
+            r = _ig_find_caption(v)
+            if r: return r
+    elif isinstance(node, list):
+        for v in node:
+            r = _ig_find_caption(v)
+            if r: return r
+    return ""
+
+def _ig_download(url, path, timeout=90):
+    r = requests.get(url, headers=_IG_UA, timeout=timeout)
+    r.raise_for_status()
+    with open(path, "wb") as f:
+        f.write(r.content)
+
+def _ig_via_api(u, api_type, prefix):
+    """(files, caption, error) — بلاک‌کننده؛ با to_thread صدا زده می‌شود"""
+    try:
+        resp = requests.get(IG_API_URL, params={"apikey": IG_API_KEY, "type": api_type, "url": u},
+                            headers=_IG_UA, timeout=30)
+    except Exception as e:
+        return [], "", f"اتصال به API: {e}"
+    body = (resp.text or "")[:400]
+    print(f"[IG-API] HTTP {resp.status_code} → {body}")
+    try:
+        r = resp.json()
+    except Exception:
+        return [], "", f"HTTP {resp.status_code} و پاسخ غیر JSON: {body[:200]}"
+    found = []
+    _ig_walk(r, found)
+    if not found:
+        err = ""
+        if isinstance(r, dict):
+            err = r.get("message") or r.get("error") or r.get("msg") or ""
+        return [], "", f"HTTP {resp.status_code} — {err or body[:200]}"
+    seen, files = set(), []
+    for i, (kind, url) in enumerate(found[:10]):
+        if url in seen: continue
+        seen.add(url)
+        path = f"{prefix}_{i}.{'mp4' if kind == 'video' else 'jpg'}"
+        try:
+            _ig_download(url, path)
+            files.append((kind, path))
+        except Exception as e:
+            print(f"[IG-API] دانلود فایل {i} ناموفق: {e}")
+    if not files:
+        return [], "", "لینک‌ها از API آمد ولی دانلود فایل ناموفق بود"
+    return files, _ig_find_caption(r), None
+
+def _ig_via_ytdlp(u, prefix):
+    import yt_dlp, glob
+    opts = {"outtmpl": f"{prefix}_%(autonumber)s.%(ext)s", "quiet": True, "no_warnings": True,
+            "noplaylist": False, "format": "best[ext=mp4]/best"}
+    if os.path.exists(IG_COOKIES_FILE):
+        opts["cookiefile"] = IG_COOKIES_FILE
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(u, download=True)
+    files = []
+    for p in sorted(glob.glob(f"{prefix}_*")):
+        ext = p.rsplit(".", 1)[-1].lower()
+        if ext in ("mp4", "mov", "webm", "mkv"): files.append(("video", p))
+        elif ext in ("jpg", "jpeg", "png", "webp"): files.append(("photo", p))
+    cap = (info or {}).get("description") or (info or {}).get("title") or ""
+    return files[:10], cap
+
 @app.on_message(filters.me & filters.command("اینستا", prefixes=""))
 async def instagram_download_command(client, message):
     if len(message.command) < 2: return await message.edit("❌ `اینستا لینک`")
@@ -1022,57 +1120,31 @@ async def instagram_download_command(client, message):
     if not u.startswith(("https://www.instagram.com/", "https://instagram.com/", "https://instagr.am/")):
         return await message.edit("❌ لینک نامعتبر")
     m = await message.edit("🔄 در حال دریافت...")
-    # نوع محتوا از روی خود لینک تشخیص داده می‌شود (پست/ریلز/استوری)
-    if "/reel/" in u or "/reels/" in u:
-        api_type = "reel"
-    elif "/stories/" in u:
-        api_type = "story"
-    else:
-        api_type = "post"
+    if "/reel/" in u or "/reels/" in u: api_type = "reel"
+    elif "/stories/" in u: api_type = "story"
+    else: api_type = "post"
+    prefix = f"ig_{message.id}"
+    files, caption, api_err, yt_err = [], "", None, None
     try:
-        resp = requests.get(
-            "https://api.fast-creat.ir/instagram",
-            params={"apikey": "8000978149:uJC3mxBncq9ELPN@Api_ManagerRoBOT", "type": api_type, "url": u},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        r = resp.json()
-        if not r.get("ok"):
-            err = r.get("message") or r.get("error") or "پاسخ نامعتبر از سرور"
-            return await m.edit(f"❌ خطا از API: `{err}`")
-        items = ((r.get("result") or {}).get("result")) or []
-        if not items:
-            return await m.edit("❌ چیزی برای دانلود پیدا نشد (لینک خصوصی/نامعتبر است؟)")
-
-        files = []
-        for i, p in enumerate(items):
-            try:
-                if p.get("is_video") and p.get("video_url"):
-                    path = f"ig_{message.id}_{i}.mp4"
-                    with open(path, "wb") as f:
-                        f.write(requests.get(p["video_url"], timeout=60).content)
-                    files.append(("video", path))
-                else:
-                    img_url = p.get("video_img") or p.get("display_url") or p.get("image_url")
-                    if not img_url:
-                        continue
-                    path = f"ig_{message.id}_{i}.jpg"
-                    with open(path, "wb") as f:
-                        f.write(requests.get(img_url, timeout=30).content)
-                    files.append(("photo", path))
-            except Exception:
-                continue
-
+        # 1) API اصلی
+        files, caption, api_err = await asyncio.to_thread(_ig_via_api, u, api_type, prefix)
+        # 2) اگر نشد، yt-dlp
         if not files:
-            return await m.edit("❌ دانلود فایل‌ها ناموفق بود")
+            try:
+                await m.edit("🔄 API جواب نداد، تلاش با روش دوم...")
+                files, caption = await asyncio.to_thread(_ig_via_ytdlp, u, prefix)
+            except ImportError:
+                yt_err = "yt-dlp نصب نیست (pip install -U yt-dlp)"
+            except Exception as e:
+                yt_err = str(e)[:300]
+        if not files:
+            return await m.edit(f"❌ دانلود اینستاگرام ناموفق بود\n\n🔹 API: `{api_err}`\n🔹 yt-dlp: `{yt_err}`")
 
-        caption = items[0].get("caption") or ""
+        caption = (caption or "")[:1000]
         if len(files) == 1:
             kind, path = files[0]
-            if kind == "video":
-                await app.send_video(message.chat.id, path, caption=caption)
-            else:
-                await app.send_photo(message.chat.id, path, caption=caption)
+            if kind == "video": await app.send_video(message.chat.id, path, caption=caption)
+            else: await app.send_photo(message.chat.id, path, caption=caption)
         else:
             from pyrogram.types import InputMediaPhoto, InputMediaVideo
             media = []
@@ -1080,15 +1152,14 @@ async def instagram_download_command(client, message):
                 cap = caption if idx == 0 else ""
                 media.append(InputMediaVideo(path, caption=cap) if kind == "video" else InputMediaPhoto(path, caption=cap))
             await app.send_media_group(message.chat.id, media)
-
-        for _, path in files:
-            try: os.remove(path)
-            except Exception: pass
         await m.delete()
-    except requests.exceptions.RequestException as e:
-        await m.edit(f"❌ خطا در اتصال به سرور دانلودر:\n`{e}`")
     except Exception as e:
         await m.edit(f"❌ خطا در دانلود:\n`{e}`")
+    finally:
+        import glob as _g
+        for p in _g.glob(f"{prefix}_*"):
+            try: os.remove(p)
+            except Exception: pass
 
 @app.on_message(filters.me & filters.command("تیکتاک", prefixes=""))
 async def tiktok_download_command(client, message):
