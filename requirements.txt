@@ -1,13 +1,11 @@
 pyrogrammod>=2.4.0
 tgcrypto
-python-telegram-bot>=22.7
 requests
-aiohttp
 pytz
 psutil
 Pillow>=10.1.0
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
 imageio-ffmpeg
-pyrogram==2.0.106
 yt-dlp
+aiohttp
