@@ -9,3 +9,5 @@ Pillow>=10.1.0
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
 imageio-ffmpeg
+pyrogram==2.0.106
+yt-dlp
