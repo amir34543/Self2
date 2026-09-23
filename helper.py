@@ -217,7 +217,7 @@ def get_categories_keyboard(uid):
         ("🎩 ترفند", "trick"), ("🎲 سرگرمی", "fun"),
         ("🎨 فرمت متن", "format"), ("🔒 قفل پیوی", "lock"),
         ("🛡 حفاظت", "protect"), ("✏️ ویرایش", "edit"),
-        ("⏰ ساعت نام", "clock"),
+        ("⏰ ساعت نام", "clock"), ("📥 دانلودر", "downloader"),
     ]
     rows = [[btn("⚡ تنظیمات زنده سلف", f"p:live:{uid}", S("s"))]]
     for i in range(0, len(c), 2):
@@ -263,6 +263,7 @@ PAGE_GRIDS = {
 # هر بخش به کدام صفحه برمی‌گردد (پیش‌فرض: صفحه ۱)
 CAT_PAGE = {k: pg for pg, grid in PAGE_GRIDS.items() for row in grid for _, k in row}
 CAT_PAGE.setdefault("clock", 1)
+CAT_PAGE.setdefault("downloader", 1)
 # صفحه‌هایی که باید به یک دسته برگردند (نه به شماره صفحه) — زیرصفحه‌های فونت
 CAT_BACK_TO_CAT = {"fontclock": "clock", "fonttext": "clock"}
 
@@ -469,7 +470,21 @@ CAT_TEXTS = {
 <code>حساب 25*4+10</code> — ماشین حساب
 <code>قیمت BTC</code> — قیمت ارز (فارسی هم میشود)
 <code>دانلود لینک_پست_تلگرام</code>
-<code>اینستا لینک_پست</code> — دانلود اینستاگرام""",
+👇 برای دانلودر اینستاگرام/تیک‌تاک/یوتیوب به بخش «📥 دانلودر» مراجعه کنید""",
+
+"downloader": """📥 <b>دانلودر</b>
+
+<b>دستورات قابل کپی:</b>
+<code>اینستا لینک</code> — دانلود پست/ریلز اینستاگرام
+مثال: <code>اینستا https://www.instagram.com/p/xxxx</code>
+
+<code>تیکتاک لینک</code> — دانلود ویدیوی تیک‌تاک بدون واترمارک
+مثال: <code>تیکتاک https://www.tiktok.com/@user/video/xxxx</code>
+
+<code>یوتیوب لینک</code> — دانلود ویدیوی یوتیوب (تا ۲۰ دقیقه)
+مثال: <code>یوتیوب https://youtu.be/xxxx</code>
+
+⚠️ این دستورات مستقیماً داخل چت با خود سلف تایپ می‌شوند و فایل برای شما ارسال خواهد شد.""",
 
 "saver": """💾 <b>ذخیره‌ساز</b>
 
