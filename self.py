@@ -312,15 +312,23 @@ CMD_STARTERS = ("بایو", "یوزر", "نام", "ترجمه", "آب", "بار�
 @app.on_message(filters.me & filters.command(["پنل", "panel"], prefixes=""))
 async def panel_command(client, message):
     loading_msg = await message.edit_text("⏳ **در حال باز کردن پنل Persian Gulf Self...**")
+    async def _send_panel(query):
+        results = await client.get_inline_bot_results(bot_username, query)
+        if not (results and results.results): return False
+        await client.send_inline_bot_result(chat_id=message.chat.id, query_id=results.query_id,
+                                            result_id=results.results[0].id)
+        return True
     try:
-        results = await client.get_inline_bot_results(bot_username, "panel")
-        if results and results.results:
-            await client.send_inline_bot_result(chat_id=message.chat.id,
-                                                query_id=results.query_id,
-                                                result_id=results.results[0].id)
-            await loading_msg.delete()
-        else:
-            await loading_msg.edit_text("❌ **پنل یافت نشد**\nربات هلپر روشن است اما پاسخی نداد.")
+        try:
+            ok = await _send_panel("panel")
+        except Exception as e:
+            # چت اجازه ارسال عکس نمی‌دهد (CHAT_SEND_PHOTOS_FORBIDDEN و مشابه): پنل متنی بدون بنر
+            if any(k in str(e) for k in ("PHOTOS_FORBIDDEN", "MEDIA_FORBIDDEN", "SEND_MEDIA", "WRITE_FORBIDDEN")):
+                ok = await _send_panel("paneltext")
+            else:
+                raise
+        if ok: await loading_msg.delete()
+        else: await loading_msg.edit_text("❌ **پنل یافت نشد**\nربات هلپر روشن است اما پاسخی نداد.")
     except Exception as e:
         err = str(e)
         if "BOT_RESPONSE_TIMEOUT" in err or "Timeout" in err:
@@ -1119,6 +1127,32 @@ def _ig_via_ytdlp(u, prefix):
     cap = (info or {}).get("description") or (info or {}).get("title") or ""
     return files[:10], cap
 
+DL_SEND_GIF = True   # همراه هر ویدیوی دانلودشده (اینستاگرام/تیکتاک) نسخه گیف هم فرستاده شود
+
+async def _has_audio(path):
+    exe = _ff()
+    if not exe: return True
+    try:
+        proc = await asyncio.create_subprocess_exec(exe, "-hide_banner", "-i", path,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _, err = await asyncio.wait_for(proc.communicate(), 30)
+        return "Audio:" in err.decode(errors="ignore")
+    except Exception:
+        return True
+
+async def _dl_send_gif(client, chat_id, video_path, gif_path, reply_id=None):
+    """گیف = ویدیوی بی‌صدا و سبک (حداکثر ۱۰ ثانیه) که به‌صورت animation فرستاده می‌شود"""
+    if not DL_SEND_GIF or not _ff(): return
+    try:
+        await _ffrun("-i", video_path, "-t", "10", "-an",
+                     "-vf", "scale='trunc(min(480,iw)/2)*2':-2,fps=15",
+                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", "-pix_fmt", "yuv420p",
+                     "-movflags", "+faststart", gif_path)
+        kw = {"reply_to_message_id": reply_id} if reply_id else {}
+        await client.send_animation(chat_id, gif_path, **kw)
+    except Exception as e:
+        print(f"[GIF] ساخت/ارسال گیف ناموفق: {e}")
+
 @app.on_message(filters.me & filters.command("اینستا", prefixes=""))
 async def instagram_download_command(client, message):
     if len(message.command) < 2: return await message.edit("❌ `اینستا لینک`")
@@ -1149,7 +1183,18 @@ async def instagram_download_command(client, message):
         caption = (caption or "")[:1000]
         if len(files) == 1:
             kind, path = files[0]
-            if kind == "video": await app.send_video(message.chat.id, path, caption=caption)
+            if kind == "video":
+                # اگر ویدیوی API بی‌صدا بود، تلاش برای نسخه اصلی (با صدا) از yt-dlp
+                if not await _has_audio(path):
+                    try:
+                        yfiles, ycap = await asyncio.to_thread(_ig_via_ytdlp, u, prefix + "y")
+                        yv = [p for k, p in yfiles if k == "video"]
+                        if yv and await _has_audio(yv[0]):
+                            path = yv[0]; caption = caption or (ycap or "")[:1000]
+                    except Exception as e:
+                        print(f"[IG] نسخه با صدا از yt-dlp نیامد: {e}")
+                await app.send_video(message.chat.id, path, caption=caption, supports_streaming=True)
+                await _dl_send_gif(client, message.chat.id, path, f"{prefix}_gif.mp4")
             else: await app.send_photo(message.chat.id, path, caption=caption)
         else:
             from pyrogram.types import InputMediaPhoto, InputMediaVideo
@@ -1163,7 +1208,7 @@ async def instagram_download_command(client, message):
         await m.edit(f"❌ خطا در دانلود:\n`{e}`")
     finally:
         import glob as _g
-        for p in _g.glob(f"{prefix}_*"):
+        for p in _g.glob(f"{prefix}_*") + _g.glob(f"{prefix}y_*"):
             try: os.remove(p)
             except Exception: pass
 
@@ -1189,16 +1234,18 @@ async def tiktok_download_command(client, message):
         with open(path, "wb") as f:
             f.write(requests.get(video_url, timeout=60).content)
         caption = data.get("title") or ""
-        await app.send_video(message.chat.id, path, caption=caption)
+        await app.send_video(message.chat.id, path, caption=caption, supports_streaming=True)
+        await _dl_send_gif(client, message.chat.id, path, f"tt_{message.id}_gif.mp4")
         await m.delete()
     except requests.exceptions.RequestException as e:
         await m.edit(f"❌ خطا در اتصال به سرور دانلودر:\n`{e}`")
     except Exception as e:
         await m.edit(f"❌ خطا در دانلود:\n`{e}`")
     finally:
-        if os.path.exists(path):
-            try: os.remove(path)
-            except Exception: pass
+        for _p in (path, f"tt_{message.id}_gif.mp4"):
+            if os.path.exists(_p):
+                try: os.remove(_p)
+                except Exception: pass
 
 @app.on_message(filters.me & filters.command("یوتیوب", prefixes=""))
 async def youtube_download_command(client, message):
@@ -3264,7 +3311,7 @@ async def new_features_edited(client, message):
 # ==============================================================================
 # ★ ساخت بنر پنل (عکس پروفایل + اسم) با Pillow ★
 # ==============================================================================
-PANEL_BANNER_FILE = "panel_banner.png"      # خروجی؛ هلپر همین فایل را می‌خواند
+PANEL_BANNER_FILE = f"panel_banner_{USER_ID}.png" if USER_ID else "panel_banner.png"      # خروجی؛ هلپر همین فایل را می‌خواند
 PANEL_TEMPLATE_FILE = "panel_template.jpg"  # پس‌زمینه بنر (اگر نبود، بنر پیش‌فرض ساخته می‌شود)
 PANEL_FONT_CANDIDATES = [
     "panel_font.ttf", "Vazirmatn-Bold.ttf", "Vazirmatn.ttf", "Vazir-Bold.ttf", "Vazir.ttf",
@@ -3440,8 +3487,8 @@ async def refresh_panel_banner():
 # ==============================================================================
 # ★ سیستم پنل — ارتباط زنده با هلپر (فایل مشترک) ★
 # ==============================================================================
-STATE_FILE = "selfbot_state.json"
-ACTIONS_FILE = "panel_actions.json"
+STATE_FILE = f"selfbot_state_{USER_ID}.json" if USER_ID else "selfbot_state.json"
+ACTIONS_FILE = f"panel_actions_{USER_ID}.json" if USER_ID else "panel_actions.json"
 
 def _atomic_write_json(path, data):
     try:
