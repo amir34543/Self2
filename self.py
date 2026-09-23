@@ -304,7 +304,7 @@ CMD_STARTERS = ("بایو", "یوزر", "نام", "ترجمه", "آب", "بار�
                 "افزودن", "سکوت", "رفع", "مخاطب", "شماره", "تاس", "ریسه", "جک", "شانس", "قلم", "ویوئر",
                 "فضول", "سلامت", "ویرایش", "تنظیم", "لیست", "فرمت", "انتی", "آنلاین", "شنود", "تایم",
                 "پاکسازی", "منوی", "بنر", "زمان", "وضعیت", "ریست", "قفل", "بازکردن", "پروفایل", "عکس",
-                "پنل", "panel", "منش", "امضا")
+                "پنل", "panel", "منش", "امضا", "جمنای", "هوش", "آهنگ", "موزیک", "اسم", "شزم", "اصلاح", "خلاصه", "متن", "تبدیل")
 
 # ==============================================================================
 # ★ هندلر پنل (اول از همه تا با بقیه تداخل نکند) ★
@@ -1313,27 +1313,703 @@ async def notes_list_cmd(client, message):
     else:
         await message.edit("یادداشتی ثبت نشده")
 
-# ================== 🎵 موسیقی و صدا ==================
-@app.on_message(filters.me & filters.regex(r"^(ویس|ویس کن)( .+)?$"))
-async def tts_cmd(client, message):
-    text = ""
-    if message.text.startswith("ویس کن") and message.reply_to_message:
-        text = message.reply_to_message.text or message.reply_to_message.caption or ""
-    elif len(message.command) > 1:
-        text = ' '.join(message.command[1:])
-    if not text: return await message.edit("❌ `ویس متن` یا ریپلای + `ویس کن`")
-    m = await message.edit("🎙 در حال تبدیل...")
-    try:
-        url = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=fa&q=" + urllib.parse.quote(text[:190])
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
-        with open("tts.mp3", "wb") as f: f.write(r.content)
+# ================== 🤖 هوش مصنوعی (Gemini) + 🎵 موسیقی و صدا ==================
+# نسخه بازنویسی‌شده: TTS چندموتوره، تبدیل ویس به متن، آهنگ‌یاب، جستجو و ارسال آهنگ، دستیار هوشمند
+import base64, shutil, importlib.util, glob as _glob_mod
+
+AI_CONFIG_FILE = f"ai_config_{USER_ID}.json" if USER_ID else "ai_config.json"
+YT_COOKIES_FILE = "youtube_cookies.txt"          # اختیاری: کوکی یوتیوب (فرمت Netscape) اگر سرور بلاک شد
+GEM_BASE = "https://generativelanguage.googleapis.com/v1beta"
+# مدل‌ها زود عوض می‌شوند؛ اگر اولی 404 بدهد خودکار سراغ بعدی می‌رود و مدل سالم ذخیره می‌شود
+GEM_TEXT_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+GEM_TTS_MODELS = ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]
+AI_ASK_NAMES = ("جمنای", "هوش")                  # کلمه‌های شروع دستور سوال از هوش مصنوعی
+MUSIC_NAMES = ("آهنگ", "موزیک")                  # کلمه‌های شروع دستور جستجوی آهنگ
+_PERSIAN_RE = re.compile(r"[\u0600-\u06FF]")
+
+_ai_cfg = jload(AI_CONFIG_FILE, {})
+def _ai_save(): jsave(AI_CONFIG_FILE, _ai_cfg)
+def _ai_key(): return (os.environ.get("GEMINI_API_KEY") or _ai_cfg.get("key") or "").strip()
+def _have(mod): return importlib.util.find_spec(mod) is not None
+
+def _ai_models(kind):
+    custom = _ai_cfg.get(f"{kind}_model")
+    base = GEM_TTS_MODELS if kind == "tts" else GEM_TEXT_MODELS
+    return ([custom] if custom else []) + [m for m in base if m != custom]
+
+# ---------------------------------------------------------------- ابزارهای کمکی دستورها
+def _split_cmd(text, names):
+    t = (text or "").strip()
+    for n in sorted(names, key=len, reverse=True):
+        if t == n: return n, ""
+        if t.startswith(n) and t[len(n)] in " \n": return n, t[len(n):].strip()
+    return None, None
+
+def _mk_filter(fn, name):
+    async def _f(_, __, m):
+        try: return bool(m.text) and bool(fn(m))
+        except Exception: return False
+    return filters.create(_f, name)
+
+def _audio_media(m):
+    """ویس/موزیک/ویدیو گرد/ویدیو یا فایل صوتی-تصویری"""
+    if not m: return None
+    if m.voice or m.audio or m.video_note or m.video: return True
+    d = m.document
+    return bool(d and (d.mime_type or "").startswith(("audio/", "video/")))
+
+def _mime_of(m):
+    if m.voice: return "audio/ogg"
+    if m.audio: return m.audio.mime_type or "audio/mpeg"
+    if m.video_note or m.video: return "video/mp4"
+    if m.document: return m.document.mime_type or "application/octet-stream"
+    return "application/octet-stream"
+
+def _rm(paths):
+    for p in paths:
         try:
-            await app.send_voice(message.chat.id, "tts.mp3")
+            if p and os.path.exists(p): os.remove(p)
+        except Exception: pass
+
+_NO_KEY_MSG = ("❌ کلید Gemini تنظیم نشده.\n"
+               "۱) از aistudio.google.com/apikey یک کلید رایگان بگیر\n"
+               "۲) بنویس: `جمنای کلید XXXX`")
+
+def _ai_err(e):
+    s = str(e)
+    return _NO_KEY_MSG if s == "NO_KEY" else f"❌ {s[:350]}"
+
+# ---------------------------------------------------------------- Gemini REST
+def _gem_post(model, body, timeout=90):
+    r = requests.post(f"{GEM_BASE}/models/{model}:generateContent",
+                      headers={"x-goog-api-key": _ai_key(), "Content-Type": "application/json"},
+                      json=body, timeout=timeout)
+    try: data = r.json()
+    except Exception: data = {}
+    return r.status_code, data
+
+def _gem_errmsg(st, data):
+    msg = ""
+    if isinstance(data, dict): msg = (data.get("error") or {}).get("message") or ""
+    return f"HTTP {st}: {msg[:200]}"
+
+def _gem_run(kind, body, timeout=90):
+    """زنجیره مدل‌ها را امتحان می‌کند؛ فقط خطای «مدل پیدا نشد» به مدل بعدی می‌رود"""
+    if not _ai_key(): raise RuntimeError("NO_KEY")
+    chain = _ai_models(kind); last = ""
+    for model in chain:
+        for attempt in range(2):
+            try: st, data = _gem_post(model, body, timeout)
+            except requests.RequestException as e:
+                raise RuntimeError(f"اتصال به Gemini برقرار نشد: {e}")
+            if st == 200:
+                if model != chain[0] and not _ai_cfg.get(f"{kind}_model"):
+                    _ai_cfg[f"{kind}_model"] = model; _ai_save()
+                return data
+            last = _gem_errmsg(st, data)
+            low = last.lower()
+            if st in (500, 503) and attempt == 0:
+                time.sleep(1.5); continue
+            if st == 404 or (st == 400 and ("not found" in low or "not supported" in low)):
+                break                                   # مدل بعدی
+            if st == 429:
+                raise RuntimeError("سهمیه/محدودیت نرخ Gemini تمام شده؛ کمی بعد دوباره امتحان کن")
+            if st in (401, 403) or (st == 400 and "api key" in low):
+                raise RuntimeError(f"کلید Gemini نامعتبر است یا دسترسی ندارد ({last})")
+            raise RuntimeError(last)
+    raise RuntimeError(last or "هیچ مدل Gemini در دسترس نبود")
+
+def _gem_extract_text(data):
+    out = []
+    for c in (data.get("candidates") or [])[:1]:
+        for p in (c.get("content") or {}).get("parts") or []:
+            if p.get("text") and not p.get("thought"): out.append(p["text"])
+    txt = "".join(out).strip()
+    if not txt:
+        br = (data.get("promptFeedback") or {}).get("blockReason")
+        raise RuntimeError("پاسخ خالی" + (f" (مسدود شد: {br})" if br else ""))
+    return txt
+
+AI_SYSTEM = ("You are a smart assistant inside a personal Telegram self-bot. "
+             "Reply in the same language the user writes in (Persian by default). "
+             "Be concise and practical; use plain text without markdown symbols.")
+
+def _gem_text(parts, system=AI_SYSTEM, json_mode=False, timeout=120):
+    body = {"contents": [{"role": "user", "parts": parts}]}
+    if system: body["systemInstruction"] = {"parts": [{"text": system}]}
+    if json_mode: body["generationConfig"] = {"responseMimeType": "application/json"}
+    return _gem_extract_text(_gem_run("text", body, timeout))
+
+def _gem_tts_pcm(text, voice):
+    body = {"contents": [{"parts": [{"text": text}]}],
+            "generationConfig": {"responseModalities": ["AUDIO"],
+                                 "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}}}}
+    data = _gem_run("tts", body, 150)
+    for c in (data.get("candidates") or [])[:1]:
+        for p in (c.get("content") or {}).get("parts") or []:
+            idata = p.get("inlineData") or p.get("inline_data")
+            if idata and idata.get("data"):
+                mt = idata.get("mimeType") or idata.get("mime_type") or ""
+                m = re.search(r"rate=(\d+)", mt)
+                return base64.b64decode(idata["data"]), int(m.group(1)) if m else 24000
+    raise RuntimeError("Gemini صدایی برنگرداند")
+
+def _inline(path, mime):
+    with open(path, "rb") as f:
+        return {"inline_data": {"mime_type": mime, "data": base64.b64encode(f.read()).decode()}}
+
+def _gem_list_models():
+    r = requests.get(f"{GEM_BASE}/models", params={"pageSize": 100},
+                     headers={"x-goog-api-key": _ai_key()}, timeout=30)
+    r.raise_for_status()
+    names = []
+    for m in r.json().get("models", []):
+        if "generateContent" in (m.get("supportedGenerationMethods") or []):
+            n = m.get("name", "").replace("models/", "")
+            if "gemini" in n: names.append(n)
+    return names
+
+# ---------------------------------------------------------------- ffmpeg
+_FF = {"exe": None, "done": False}
+def _ff():
+    """مسیر ffmpeg؛ اگر فقط imageio-ffmpeg باشد یک میان‌بر «ffmpeg» روی PATH می‌سازد (برای yt-dlp/shazamio)"""
+    if _FF["done"]: return _FF["exe"]
+    _FF["done"] = True
+    exe = shutil.which("ffmpeg")
+    if not exe:
+        try:
+            import imageio_ffmpeg
+            real = imageio_ffmpeg.get_ffmpeg_exe()
+            d = os.path.abspath("_ffbin"); os.makedirs(d, exist_ok=True)
+            shim = os.path.join(d, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+            if not os.path.exists(shim):
+                try: os.symlink(real, shim)
+                except Exception:
+                    shutil.copy(real, shim); os.chmod(shim, 0o755)
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+            exe = shim
         except Exception:
-            await app.send_audio(message.chat.id, "tts.mp3")
-        os.remove("tts.mp3"); await m.delete()
+            exe = None
+    _FF["exe"] = exe
+    return exe
+
+async def _ffrun(*args, timeout=180):
+    exe = _ff()
+    if not exe: raise RuntimeError("ffmpeg نصب نیست (pip install imageio-ffmpeg)")
+    proc = await asyncio.create_subprocess_exec(exe, "-y", "-hide_banner", "-loglevel", "error", *args,
+                                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    _, err = await asyncio.wait_for(proc.communicate(), timeout)
+    if proc.returncode != 0:
+        raise RuntimeError((err or b"").decode(errors="ignore")[-200:] or "ffmpeg failed")
+
+async def _ff_duration(path):
+    exe = _ff()
+    if not exe: return 0
+    try:
+        proc = await asyncio.create_subprocess_exec(exe, "-hide_banner", "-i", path,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _, err = await asyncio.wait_for(proc.communicate(), 30)
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", err.decode(errors="ignore"))
+        if m: return int(round(int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))))
+    except Exception: pass
+    return 0
+
+async def _to_ogg(src, dst, pcm_rate=None):
+    pre = ["-f", "s16le", "-ar", str(pcm_rate), "-ac", "1"] if pcm_rate else []
+    await _ffrun(*pre, "-i", src, "-vn", "-c:a", "libopus", "-b:a", "32k", "-ar", "48000", "-ac", "1", dst)
+
+def _pcm_to_wav(pcm, rate, path):
+    import wave
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(pcm)
+
+async def _prep_audio(src, mime, tmp):
+    """فایل صوتی را برای Gemini آماده می‌کند (مونو، سبک، mp3)"""
+    size = os.path.getsize(src)
+    if not _ff():
+        if (mime or "").startswith("audio/") and size <= 14 * 1024 * 1024: return src, mime
+        raise RuntimeError("برای پردازش ویدیو/فایل‌های سنگین ffmpeg لازم است (pip install imageio-ffmpeg)")
+    if mime in ("audio/mpeg", "audio/mp3") and size <= 12 * 1024 * 1024: return src, "audio/mpeg"
+    dst = src + "_c.mp3"; tmp.append(dst)
+    await _ffrun("-i", src, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", dst)
+    if os.path.getsize(dst) > 15 * 1024 * 1024:
+        raise RuntimeError("فایل صوتی برای پردازش خیلی طولانی است")
+    return dst, "audio/mpeg"
+
+# ---------------------------------------------------------------- 🎙 متن به ویس
+def _voice_name():
+    return _ai_cfg.get("voice") or ("Charon" if _ai_cfg.get("gender") == "male" else "Kore")
+
+async def _synth_voice(text, base, tmp):
+    """(path, engine, is_voice) — Gemini ← Edge-TTS ← gTTS؛ هر کدام شکست خورد بعدی"""
+    errors = []
+    ogg = base + ".ogg"; tmp.append(ogg)
+    male = _ai_cfg.get("gender") == "male"
+    fa = bool(_PERSIAN_RE.search(text))
+    if _ai_key():
+        try:
+            pcm, rate = await asyncio.to_thread(_gem_tts_pcm, text, _voice_name())
+            try:
+                p = base + ".pcm"; tmp.append(p)
+                with open(p, "wb") as f: f.write(pcm)
+                await _to_ogg(p, ogg, rate)
+                return ogg, "Gemini", True
+            except Exception as e:
+                if _ff(): raise
+                w = base + ".wav"; tmp.append(w)      # بدون ffmpeg: wav خام
+                _pcm_to_wav(pcm, rate, w)
+                return w, "Gemini", False
+        except Exception as e:
+            errors.append(f"Gemini: {e}")
+    mp3 = base + ".mp3"; tmp.append(mp3)
+    try:
+        import edge_tts
+        voice = (("fa-IR-FaridNeural" if male else "fa-IR-DilaraNeural") if fa
+                 else ("en-US-GuyNeural" if male else "en-US-AriaNeural"))
+        await edge_tts.Communicate(text, voice).save(mp3)
+        engine = "Edge-TTS"
+    except ImportError:
+        errors.append("edge-tts نصب نیست"); engine = None
     except Exception as e:
-        await m.edit(f"❌ `{e}`")
+        errors.append(f"Edge-TTS: {e}"); engine = None
+    if engine is None:
+        try:
+            from gtts import gTTS
+            await asyncio.to_thread(lambda: gTTS(text[:4500], lang="fa" if fa else "en").save(mp3))
+            engine = "gTTS"
+        except ImportError:
+            errors.append("gTTS نصب نیست")
+        except Exception as e:
+            errors.append(f"gTTS: {e}")
+    if engine and os.path.exists(mp3):
+        try:
+            await _to_ogg(mp3, ogg)
+            return ogg, engine, True
+        except Exception:
+            return mp3, engine, False
+    raise RuntimeError(" | ".join(errors) or "هیچ موتور تبدیل متن به صدا در دسترس نیست")
+
+def _f_tts(m):
+    name, arg = _split_cmd(m.text, ("ویس کن", "ویس"))
+    if not name or arg in ("روشن", "خاموش"): return False     # «ویس روشن» = قفل ویس
+    return bool(arg) or bool(m.reply_to_message)
+
+@app.on_message(filters.me & _mk_filter(_f_tts, "tts"))
+async def tts_cmd(client, message):
+    name, arg = _split_cmd(message.text, ("ویس کن", "ویس"))
+    r = message.reply_to_message
+    text = arg or ((r.text or r.caption or "") if r else "")
+    if not text.strip():
+        return await _safe_edit(message, "❌ `ویس متن` یا ریپلای روی یک متن + `ویس کن`")
+    text = text.strip()[:3000]
+    await _safe_edit(message, "🎙 در حال ساخت ویس...")
+    tmp = []
+    try:
+        base = os.path.abspath(f"tts_{message.id}_{int(time.time())}")
+        path, engine, is_voice = await _synth_voice(text, base, tmp)
+        kw = {"reply_to_message_id": r.id} if r else {}
+        if is_voice:
+            dur = await _ff_duration(path)
+            await client.send_voice(message.chat.id, path, duration=dur, **kw)
+        else:
+            await client.send_audio(message.chat.id, path, title="Voice", **kw)
+        await message.delete()
+    except Exception as e:
+        await _safe_edit(message, f"❌ ساخت ویس ناموفق بود:\n`{str(e)[:400]}`")
+    finally:
+        _rm(tmp)
+
+# ---------------------------------------------------------------- 📝 ویس به متن
+STT_PROMPT = ("Transcribe this audio exactly as spoken. Detect the language automatically and keep the original "
+              "language (do NOT translate). Persian must be written in Persian script with proper punctuation. "
+              "Return ONLY the transcript, no comments. If there is no speech, return exactly: [بدون گفتار]")
+
+async def _transcribe_msg(client, r, tmp):
+    src = await client.download_media(r, file_name=os.path.abspath(f"stt_{r.id}_{int(time.time())}"))
+    if not src: raise RuntimeError("دانلود فایل ناموفق بود")
+    tmp.append(src)
+    path, mime = await _prep_audio(src, _mime_of(r), tmp)
+    return await asyncio.to_thread(_gem_text, [{"text": STT_PROMPT}, _inline(path, mime)], None)
+
+def _f_stt(m):
+    name, arg = _split_cmd(m.text, ("تبدیل به متن", "ویس به متن", "متن"))
+    if not name or arg: return False
+    if name == "متن": return bool(_audio_media(m.reply_to_message))    # «متن» تنها وقتی ریپلای روی ویس است
+    return True
+
+@app.on_message(filters.me & _mk_filter(_f_stt, "stt"))
+async def stt_cmd(client, message):
+    r = message.reply_to_message
+    if not _audio_media(r):
+        return await _safe_edit(message, "❌ روی یک ویس/موزیک/ویدیو ریپلای کنید")
+    await _safe_edit(message, "📝 در حال تبدیل صدا به متن...")
+    tmp = []
+    try:
+        txt = await _transcribe_msg(client, r, tmp)
+        if len(txt) > 3800:
+            p = os.path.abspath(f"stt_{message.id}.txt"); tmp.append(p)
+            with open(p, "w", encoding="utf-8") as f: f.write(txt)
+            await client.send_document(message.chat.id, p, caption="📝 متن ویس", reply_to_message_id=r.id)
+            await message.delete()
+        else:
+            await _safe_edit(message, "📝 **متن ویس:**\n\n" + txt, parse_mode=enums.ParseMode.DISABLED)
+    except Exception as e:
+        await _safe_edit(message, _ai_err(e))
+    finally:
+        _rm(tmp)
+
+@app.on_message(filters.private & filters.incoming & filters.voice, group=5)
+async def auto_stt_incoming(client, message):
+    """اختیاری: ویس‌های ورودی پیوی را به متن تبدیل و برای خودت در Saved Messages می‌فرستد (به طرف مقابل چیزی نمی‌رود)"""
+    if not (_ai_cfg.get("auto_stt") and _ai_key()): return
+    if (message.voice.duration or 0) > 300: return
+    tmp = []
+    try:
+        txt = await _transcribe_msg(client, message, tmp)
+        who = message.from_user.first_name if message.from_user else "؟"
+        await client.send_message("me", f"🎙 ویس از {who}:\n\n{txt}"[:4000], parse_mode=enums.ParseMode.DISABLED)
+    except Exception as e:
+        print(f"[AUTO-STT] {e}")
+    finally:
+        _rm(tmp)
+
+# ---------------------------------------------------------------- 🎵 آهنگ‌یاب (Shazam ← Gemini)
+async def _sample_audio(src, tmp):
+    dur = await _ff_duration(src)
+    ss = min(int(dur * 0.3), 90) if dur and dur > 45 else 0
+    dst = src + "_s.mp3"; tmp.append(dst)
+    args = (["-ss", str(ss)] if ss else []) + ["-i", src, "-vn", "-t", "20", "-ac", "1", "-ar", "44100", "-b:a", "128k", dst]
+    await _ffrun(*args)
+    return dst
+
+async def _recognize_song(client, r, tmp):
+    """dict(title, artist, url, source, guess) یا None"""
+    src = await client.download_media(r, file_name=os.path.abspath(f"rec_{r.id}_{int(time.time())}"))
+    if not src: raise RuntimeError("دانلود فایل ناموفق بود")
+    tmp.append(src)
+    if not _have("shazamio") and not _ai_key():
+        raise RuntimeError("نه shazamio نصب است نه کلید Gemini؛ `pip install shazamio` یا `جمنای کلید ...`")
+    samp = await _sample_audio(src, tmp)
+    errors = []
+    if _have("shazamio"):
+        try:
+            from shazamio import Shazam
+            sh = Shazam()
+            fn = getattr(sh, "recognize", None) or getattr(sh, "recognize_song")
+            out = await fn(samp)
+            tr = (out or {}).get("track")
+            if tr and tr.get("title"):
+                return {"title": tr.get("title"), "artist": tr.get("subtitle") or "", "url": tr.get("url") or "",
+                        "source": "Shazam", "guess": False}
+        except Exception as e:
+            errors.append(f"Shazam: {e}")
+    if _ai_key():
+        try:
+            prompt = ("Identify the song in this audio clip (by melody, vocals and any audible lyrics). "
+                      'Return JSON only: {"title": string|null, "artist": string|null}. '
+                      "If you are not confident, use null for both. Never invent a song.")
+            txt = await asyncio.to_thread(_gem_text, [{"text": prompt}, _inline(samp, "audio/mpeg")], None, True)
+            try: d = json.loads(txt)
+            except Exception:
+                mm = re.search(r"\{.*\}", txt, re.S); d = json.loads(mm.group()) if mm else {}
+            if isinstance(d, list) and d: d = d[0]
+            if isinstance(d, dict) and d.get("title"):
+                return {"title": d["title"], "artist": d.get("artist") or "", "url": "", "source": "Gemini", "guess": True}
+        except Exception as e:
+            errors.append(f"Gemini: {e}")
+    if errors: print("[SONG-ID]", " | ".join(errors))
+    return None
+
+def _song_text(s):
+    t = f"🎵 **{s['title']}**"
+    if s["artist"]: t += f"\n👤 {s['artist']}"
+    t += f"\n🔎 منبع: {s['source']}"
+    if s["guess"]: t += "\n⚠️ این یک حدس هوش مصنوعی است و ممکن است اشتباه باشد"
+    if s["url"]: t += f"\n🔗 {s['url']}"
+    return t
+
+def _f_songid(m):
+    name, arg = _split_cmd(m.text, ("اسم آهنگ", "آهنگ یاب", "شزم"))
+    return bool(name) and not arg
+
+@app.on_message(filters.me & _mk_filter(_f_songid, "songid"))
+async def songid_cmd(client, message):
+    r = message.reply_to_message
+    if not _audio_media(r):
+        return await _safe_edit(message, "❌ روی یک ویس/آهنگ/ویدیو ریپلای کنید")
+    await _safe_edit(message, "🎧 در حال تشخیص آهنگ...")
+    tmp = []
+    try:
+        s = await _recognize_song(client, r, tmp)
+        if not s: return await _safe_edit(message, "❌ آهنگ شناسایی نشد؛ یک تکه واضح‌تر (بدون حرف‌زدن روی آن) امتحان کنید")
+        await _safe_edit(message, _song_text(s), parse_mode=enums.ParseMode.DISABLED)
+    except Exception as e:
+        await _safe_edit(message, _ai_err(e))
+    finally:
+        _rm(tmp)
+
+# ---------------------------------------------------------------- 🎵 جستجو و ارسال آهنگ
+def _music_fetch(query, prefix):
+    """بلاک‌کننده (با to_thread صدا زده شود): جستجو در یوتیوب و در صورت شکست ساندکلود"""
+    import yt_dlp
+    errors = []
+    for src in ("ytsearch5", "scsearch5"):
+        try:
+            so = {"quiet": True, "no_warnings": True, "extract_flat": True, "skip_download": True, "socket_timeout": 30}
+            if src.startswith("yt") and os.path.exists(YT_COOKIES_FILE): so["cookiefile"] = YT_COOKIES_FILE
+            with yt_dlp.YoutubeDL(so) as y:
+                res = y.extract_info(f"{src}:{query}", download=False)
+            entries = [e for e in (res or {}).get("entries", []) if e]
+            good = [e for e in entries if not e.get("is_live") and 30 <= (e.get("duration") or 200) <= 1200] or entries
+            if not good:
+                errors.append(f"{src[:2]}: نتیجه‌ای نبود"); continue
+            pick = good[0]
+            url = pick.get("webpage_url") or pick.get("url")
+            dl = {"quiet": True, "no_warnings": True, "noplaylist": True, "socket_timeout": 30,
+                  "format": "bestaudio[ext=m4a]/bestaudio/best", "outtmpl": f"{prefix}.%(ext)s"}
+            if src.startswith("yt") and os.path.exists(YT_COOKIES_FILE): dl["cookiefile"] = YT_COOKIES_FILE
+            with yt_dlp.YoutubeDL(dl) as y:
+                info = y.extract_info(url, download=True)
+            files = [p for p in _glob_mod.glob(f"{prefix}.*") if not p.endswith((".part", ".ytdl", ".jpg"))]
+            if not files:
+                errors.append(f"{src[:2]}: فایل دانلود نشد"); continue
+            return {"path": files[0], "title": info.get("track") or info.get("title") or query,
+                    "performer": info.get("artist") or info.get("uploader") or info.get("channel") or "",
+                    "duration": int(info.get("duration") or 0), "thumb": info.get("thumbnail") or "", "url": url}
+        except Exception as e:
+            errors.append(f"{src[:2]}: {str(e)[:160]}")
+    hint = ""
+    if any("confirm you" in x.lower() or "sign in" in x.lower() for x in errors):
+        hint = f"\n💡 یوتیوب سرور را بلاک کرده؛ فایل کوکی `{YT_COOKIES_FILE}` را کنار سلف بگذار"
+    raise RuntimeError(" | ".join(errors) + hint)
+
+async def _music_send(client, message, query, reply_id=None, extra=""):
+    prefix = os.path.abspath(f"mus_{message.id}_{int(time.time())}")
+    tmp = []
+    try:
+        await _safe_edit(message, f"🔎 در حال جستجوی «{query[:60]}»...")
+        info = await asyncio.to_thread(_music_fetch, query, prefix)
+        path = info["path"]; tmp.append(path)
+        await _safe_edit(message, f"⬇️ {info['title'][:60]} — در حال آماده‌سازی...")
+        if _ff() and not path.endswith(".mp3"):
+            mp3 = prefix + "_out.mp3"; tmp.append(mp3)
+            try:
+                await _ffrun("-i", path, "-vn", "-c:a", "libmp3lame", "-b:a", "128k", mp3)
+                path = mp3
+            except Exception: pass                      # ارسال همان فایل اصلی
+        if os.path.getsize(path) > 1900 * 1024 * 1024:
+            return await _safe_edit(message, "❌ حجم فایل زیاد است")
+        thumb = None
+        if info["thumb"].lower().split("?")[0].endswith((".jpg", ".jpeg")):
+            try:
+                tp = prefix + "_t.jpg"; tmp.append(tp)
+                rr = await asyncio.to_thread(lambda: requests.get(info["thumb"], timeout=15))
+                if rr.ok and len(rr.content) < 200 * 1024:
+                    with open(tp, "wb") as f: f.write(rr.content)
+                    thumb = tp
+            except Exception: pass
+        cap = f"🎵 {info['title']}" + (f"\n👤 {info['performer']}" if info["performer"] else "") + extra
+        kw = {"reply_to_message_id": reply_id} if reply_id else {}
+        await client.send_audio(message.chat.id, path, caption=cap[:1000], title=info["title"][:64],
+                                performer=(info["performer"] or "")[:64], duration=info["duration"],
+                                thumb=thumb, **kw)
+        await message.delete()
+    except ImportError:
+        await _safe_edit(message, "❌ `yt-dlp` نصب نیست: `pip install -U yt-dlp`")
+    except Exception as e:
+        await _safe_edit(message, f"❌ آهنگ پیدا/ارسال نشد:\n`{str(e)[:500]}`")
+    finally:
+        _rm(tmp); _rm(_glob_mod.glob(f"{prefix}*"))
+
+def _f_music(m):
+    name, arg = _split_cmd(m.text, MUSIC_NAMES)
+    if not name: return False
+    if not arg: return bool(m.reply_to_message)
+    return len(arg.split()) <= 8 and "؟" not in arg and "?" not in arg    # جمله معمولی را دستور حساب نکن
+
+@app.on_message(filters.me & _mk_filter(_f_music, "music"))
+async def music_cmd(client, message):
+    name, arg = _split_cmd(message.text, MUSIC_NAMES)
+    r = message.reply_to_message
+    if arg:
+        return await _music_send(client, message, arg, r.id if r else None)
+    if _audio_media(r):                                  # ریپلای روی ویس/آهنگ: تشخیص + ارسال نسخه کامل
+        await _safe_edit(message, "🎧 در حال تشخیص آهنگ...")
+        tmp = []
+        try:
+            s = await _recognize_song(client, r, tmp)
+        except Exception as e:
+            return await _safe_edit(message, _ai_err(e))
+        finally:
+            _rm(tmp)
+        if not s:
+            return await _safe_edit(message, "❌ آهنگ شناسایی نشد؛ یک تکه واضح‌تر امتحان کنید")
+        q = f"{s['artist']} {s['title']}".strip()
+        extra = "\n⚠️ حدس هوش مصنوعی" if s["guess"] else ""
+        return await _music_send(client, message, q, r.id, extra)
+    q = ((r.text or r.caption or "") if r else "").strip()[:100]
+    if not q: return await _safe_edit(message, "❌ `آهنگ اسم` | ریپلای روی ویس/آهنگ | ریپلای روی متن")
+    await _music_send(client, message, q, r.id)
+
+# ---------------------------------------------------------------- 🤖 دستیار هوشمند (Gemini)
+async def _media_parts(client, r, tmp):
+    """عکس/ویس/موزیک/ویدیو گرد پیام ریپلای‌شده را برای Gemini آماده می‌کند"""
+    if not r: return []
+    if r.photo:
+        p = await client.download_media(r, file_name=os.path.abspath(f"ai_{r.id}_{int(time.time())}"))
+        if p: tmp.append(p); return [_inline(p, "image/jpeg")]
+    elif _audio_media(r):
+        p = await client.download_media(r, file_name=os.path.abspath(f"ai_{r.id}_{int(time.time())}"))
+        if p:
+            tmp.append(p); path, mime = await _prep_audio(p, _mime_of(r), tmp)
+            return [_inline(path, mime)]
+    return []
+
+async def _send_long(client, message, text):
+    chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)] or ["—"]
+    await _safe_edit(message, chunks[0], parse_mode=enums.ParseMode.DISABLED)
+    for c in chunks[1:]:
+        try: await client.send_message(message.chat.id, c, parse_mode=enums.ParseMode.DISABLED)
+        except Exception: pass
+
+def _f_ask(m):
+    name, arg = _split_cmd(m.text, AI_ASK_NAMES)
+    return bool(name) and (bool(arg) or bool(m.reply_to_message))
+
+async def _ai_admin(message, arg):
+    """زیر‌دستورهای تنظیمات: کلید / وضعیت / مدل / صدا / خودکار / ریست"""
+    first, _, rest = arg.partition(" "); rest = rest.strip()
+    if first == "کلید":
+        if not rest: return await _safe_edit(message, "❌ `جمنای کلید XXXX`")
+        _ai_cfg["key"] = rest; _ai_save()
+        await _safe_edit(message, "🔑 کلید ذخیره شد؛ در حال بررسی...")     # متن حاوی کلید همین لحظه ویرایش می‌شود
+        try:
+            await asyncio.to_thread(_gem_list_models)
+            await _safe_edit(message, "✅ کلید Gemini معتبر است و ذخیره شد")
+        except Exception as e:
+            _ai_cfg.pop("key", None); _ai_save()
+            await _safe_edit(message, f"❌ کلید معتبر نبود و ذخیره نشد: `{str(e)[:150]}`")
+        await asyncio.sleep(6)
+        try: await message.delete()
+        except Exception: pass
+        return True
+    if first in ("وضعیت", "status") and not rest:
+        k = _ai_key()
+        eng = "، ".join(n for n, mod in (("Edge-TTS", "edge_tts"), ("gTTS", "gtts"), ("Shazam", "shazamio"),
+                                        ("yt-dlp", "yt_dlp")) if _have(mod)) or "—"
+        await _safe_edit(message,
+            "🤖 **وضعیت هوش مصنوعی**\n"
+            f"🔑 کلید: {'✅ ' + k[:6] + '…' if k else '❌ تنظیم نشده'}\n"
+            f"🧠 مدل متن: `{_ai_models('text')[0]}`\n🗣 مدل صدا: `{_ai_models('tts')[0]}`\n"
+            f"🎙 صدا: {_voice_name()} ({'مرد' if _ai_cfg.get('gender') == 'male' else 'زن'})\n"
+            f"📝 ویس ورودی خودکار: {'روشن' if _ai_cfg.get('auto_stt') else 'خاموش'}\n"
+            f"🎞 ffmpeg: {'✅' if _ff() else '❌'}\n🧩 ماژول‌ها: {eng}")
+        return True
+    if first == "مدل":
+        if rest in ("ها", "لیست"):
+            try:
+                names = await asyncio.to_thread(_gem_list_models)
+                await _safe_edit(message, "🧠 **مدل‌های در دسترس:**\n" + "\n".join(f"• `{n}`" for n in names[:40]))
+            except Exception as e:
+                await _safe_edit(message, _ai_err(e))
+        elif rest.startswith("صدا "):
+            _ai_cfg["tts_model"] = rest[4:].strip(); _ai_save()
+            await _safe_edit(message, f"✅ مدل صدا: `{_ai_cfg['tts_model']}`")
+        elif rest:
+            _ai_cfg["text_model"] = rest; _ai_save()
+            await _safe_edit(message, f"✅ مدل متن: `{rest}`")
+        else:
+            await _safe_edit(message, "❌ `جمنای مدل ها` | `جمنای مدل NAME` | `جمنای مدل صدا NAME`")
+        return True
+    if first == "صدا":
+        if rest in ("زن", "مرد"):
+            _ai_cfg["gender"] = "male" if rest == "مرد" else "female"; _ai_cfg.pop("voice", None)
+        elif rest and re.fullmatch(r"[A-Za-z]{3,20}", rest):
+            _ai_cfg["voice"] = rest.capitalize()
+        else:
+            await _safe_edit(message, "❌ `جمنای صدا زن` | `جمنای صدا مرد` | `جمنای صدا Puck`"); return True
+        _ai_save(); await _safe_edit(message, f"✅ صدای ویس: {_voice_name()}")
+        return True
+    if first == "خودکار" and rest in ("روشن", "خاموش"):
+        _ai_cfg["auto_stt"] = rest == "روشن"; _ai_save()
+        await _safe_edit(message, f"📝 تبدیل خودکار ویس‌های ورودی پیوی {'روشن' if _ai_cfg['auto_stt'] else 'خاموش'} شد")
+        return True
+    if first == "ریست" and not rest:
+        for k in ("text_model", "tts_model", "voice", "gender"): _ai_cfg.pop(k, None)
+        _ai_save(); await _safe_edit(message, "🔄 تنظیمات مدل و صدا ریست شد")
+        return True
+    return False
+
+@app.on_message(filters.me & _mk_filter(_f_ask, "ai_ask"))
+async def ai_ask_cmd(client, message):
+    name, arg = _split_cmd(message.text, AI_ASK_NAMES)
+    if arg and await _ai_admin(message, arg): return
+    r = message.reply_to_message
+    await _safe_edit(message, "🤖 در حال فکر کردن...")
+    tmp = []
+    try:
+        parts = []
+        ctx = (r.text or r.caption or "") if r else ""
+        if ctx:
+            parts.append({"text": f"Message being discussed:\n\"\"\"\n{ctx[:6000]}\n\"\"\""})
+        parts += await _media_parts(client, r, tmp)
+        parts.append({"text": arg or "Explain / respond helpfully to the message above."})
+        ans = await asyncio.to_thread(_gem_text, parts)
+        head = f"❓ {arg[:200]}\n\n" if arg else ""
+        await _send_long(client, message, f"{head}🤖 {ans}")
+    except Exception as e:
+        await _safe_edit(message, _ai_err(e))
+    finally:
+        _rm(tmp)
+
+def _f_sum(m):
+    t = (m.text or "").strip()
+    return (t == "خلاصه" and bool(m.reply_to_message)) or bool(re.fullmatch(r"خلاصه \d{1,3}", t))
+
+@app.on_message(filters.me & _mk_filter(_f_sum, "ai_sum"))
+async def ai_summary_cmd(client, message):
+    t = message.text.strip(); r = message.reply_to_message
+    await _safe_edit(message, "🧾 در حال خلاصه‌سازی...")
+    tmp = []
+    try:
+        if t == "خلاصه":
+            parts = [{"text": "Summarize the following in a few short lines (same language as the content):"}]
+            if r.text or r.caption: parts.append({"text": (r.text or r.caption)[:12000]})
+            parts += await _media_parts(client, r, tmp)
+        else:
+            n = min(int(t.split()[1]), 300); lines = []
+            async for m in client.get_chat_history(message.chat.id, limit=n + 1):
+                if m.id == message.id: continue
+                who = m.from_user.first_name if m.from_user else "؟"
+                body = m.text or m.caption
+                if not body and m.media: body = "[" + str(m.media).split(".")[-1].lower() + "]"
+                if body: lines.append(f"{who}: {body}")
+            lines.reverse()
+            parts = [{"text": "Summarize this chat conversation: main topics, decisions, and anything needing a reply. "
+                              "Be brief, same language as the chat.\n\n" + "\n".join(lines)[:30000]}]
+        ans = await asyncio.to_thread(_gem_text, parts)
+        await _send_long(client, message, f"🧾 **خلاصه:**\n\n{ans}")
+    except Exception as e:
+        await _safe_edit(message, _ai_err(e))
+    finally:
+        _rm(tmp)
+
+def _f_fix(m):
+    t = (m.text or "").strip()
+    return (t in ("اصلاح", "اصلاح متن") and bool(m.reply_to_message)) or t.startswith("اصلاح متن ")
+
+@app.on_message(filters.me & _mk_filter(_f_fix, "ai_fix"))
+async def ai_fix_cmd(client, message):
+    t = message.text.strip(); r = message.reply_to_message
+    src = t[len("اصلاح متن "):].strip() if t.startswith("اصلاح متن ") else ((r.text or r.caption or "") if r else "")
+    if not src: return await _safe_edit(message, "❌ روی یک متن ریپلای کنید یا `اصلاح متن ...` بنویسید")
+    await _safe_edit(message, "✍️ در حال اصلاح...")
+    try:
+        ans = await asyncio.to_thread(_gem_text, [{"text": "Fix spelling, grammar and punctuation of this text without changing its "
+                                                           "meaning or language. Return ONLY the corrected text:\n\n" + src[:6000]}], None)
+        await _send_long(client, message, ans)
+    except Exception as e:
+        await _safe_edit(message, _ai_err(e))
 
 # ================== 📊 سیستم و ❤️ سلامت ==================
 @app.on_message(filters.me & filters.command("پینگ", prefixes=""))
@@ -2962,6 +3638,7 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     app.start()
     print("🔗 سیستم پنل Persian Gulf Self فعال شد")
+    print(f"🤖 Gemini: {'کلید تنظیم شده' if _ai_key() else 'کلید ندارد (جمنای کلید XXXX)'} | ffmpeg: {'OK' if _ff() else 'نیست'}")
     try:
         loop.run_until_complete(asyncio.gather(
             panel_state_loop(), panel_actions_loop(),
