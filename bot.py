@@ -729,6 +729,11 @@ async def run_selfbot_async(user_id, phone=None):
 async def stop_selfbot_async(user_id, reason=""):
     return await asyncio.to_thread(stop_selfbot, user_id, reason)
 
+# ==============================================================================
+# ⚠️ ترتیب هندلرها مهم است! هندلرهای اختصاصی باید قبل از روتر کلی ثبت شوند
+# چون در Pyrogram در هر گروه فقط اولین هندلری که فیلترش بخورد اجرا می‌شود
+# ==============================================================================
+
 # ==============================
 # انتقال الماس بین کاربران گروه
 # ==============================
@@ -1149,21 +1154,60 @@ async def private_photo_handler(client, message: Message):
         await message.reply_text("❌ خطا در ارسال رسید. بعداً دوباره تلاش کنید.")
 
 # ==============================
-# 🏓 تست سلامت بات (قبل از روتر متن تا اولویت داشته باشد)
+# 🏓 تست سلامت بات
 # ==============================
 @bot.on_message(filters.command("ping") & filters.private)
 async def ping_cmd(client, message):
     await message.reply_text(f"🏓 پونگ! بات زنده است ⏰ {time.strftime('%H:%M:%S')}")
 
 # ==============================
-# روتر پیام‌های متنی پیوی
+# 🌺 استارت + عضویت اجباری + زیرمجموعه
+# ⚠️ این هندلر باید قبل از private_text_router ثبت شود وگرنه روتر آن را می‌بلعد!
+# ==============================
+@bot.on_message(filters.command("start") & filters.private)
+async def start_handler(client, message: Message):
+    user = message.from_user
+    uid = user.id
+    payload = message.command[1] if len(message.command) > 1 else ""
+
+    ok, chans = await check_force_join(client, uid)
+    if not ok:
+        rows = [[InlineKeyboardButton(f"📣 عضویت در {ch}", url=f"https://t.me/{ch}")] for ch in chans]
+        rows.append([InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_join", style=KeyboardButtonStyle(bg_success=True))])
+        await message.reply_text(
+            "⚠️ **برای استفاده از ربات ابتدا در کانال عضو شوید:**",
+            reply_markup=InlineKeyboardMarkup(rows),
+            disable_web_page_preview=True
+        )
+        return
+
+    was_new = db.get("users", uid) is None
+    await show_main_menu(client, uid, user)
+
+    if was_new and payload.startswith("ref_"):
+        try:
+            ref_id = int(payload[4:])
+        except:
+            ref_id = None
+        if ref_id and ref_id != uid and db.get("users", ref_id) is not None:
+            ref_info = db.get("users", ref_id)
+            ref_info["referrals"] = ref_info.get("referrals", 0) + 1
+            db.set("users", ref_id, ref_info)
+            db.set("credits", ref_id, db.get("credits", ref_id, 0) + 3)
+            try:
+                await client.send_message(ref_id, "🎁 یک نفر با لینک شما عضو ربات شد!\n💎 +۳ الماس به حساب شما اضافه شد.")
+            except:
+                pass
+
+# ==============================
+# روتر پیام‌های متنی پیوی — باید آخرین هندلر متنی باشد (بعد از همه دستورها)
 # ==============================
 @bot.on_message(filters.private & filters.text)
 async def private_text_router(client, message: Message):
     uid = message.from_user.id
     t = (message.text or "").strip()
 
-    # دستورات و انصراف
+    # دستورات توسط هندلرهای اختصاصی بالاتر پردازش می‌شوند؛ اینجا فقط /cancel
     if t.startswith("/"):
         if t.startswith("/cancel"):
             admin_restore_wait.discard(uid)
@@ -1963,44 +2007,6 @@ async def show_main_menu(client, chat_id, user):
 🎰 هر روز یک بار گردونه شانس را امتحان کن!
 {MENU_WIDTH_PAD}"""
     await client.send_message(chat_id, welcome_text, reply_markup=keyboard)
-
-# ==============================
-# استارت + عضویت اجباری + زیرمجموعه
-# ==============================
-@bot.on_message(filters.command("start") & filters.private)
-async def start_handler(client, message: Message):
-    user = message.from_user
-    uid = user.id
-    payload = message.command[1] if len(message.command) > 1 else ""
-
-    ok, chans = await check_force_join(client, uid)
-    if not ok:
-        rows = [[InlineKeyboardButton(f"📣 عضویت در {ch}", url=f"https://t.me/{ch}")] for ch in chans]
-        rows.append([InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_join", style=KeyboardButtonStyle(bg_success=True))])
-        await message.reply_text(
-            "⚠️ **برای استفاده از ربات ابتدا در کانال عضو شوید:**",
-            reply_markup=InlineKeyboardMarkup(rows),
-            disable_web_page_preview=True
-        )
-        return
-
-    was_new = db.get("users", uid) is None
-    await show_main_menu(client, uid, user)
-
-    if was_new and payload.startswith("ref_"):
-        try:
-            ref_id = int(payload[4:])
-        except:
-            ref_id = None
-        if ref_id and ref_id != uid and db.get("users", ref_id) is not None:
-            ref_info = db.get("users", ref_id)
-            ref_info["referrals"] = ref_info.get("referrals", 0) + 1
-            db.set("users", ref_id, ref_info)
-            db.set("credits", ref_id, db.get("credits", ref_id, 0) + 3)
-            try:
-                await client.send_message(ref_id, "🎁 یک نفر با لینک شما عضو ربات شد!\n💎 +۳ الماس به حساب شما اضافه شد.")
-            except:
-                pass
 
 # ==============================
 # 🔍 لاگ همه پیام‌های پیوی (برای عیب‌یابی)
