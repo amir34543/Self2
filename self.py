@@ -33,16 +33,12 @@ if len(sys.argv) > 2: PHONE = sys.argv[2]
 if len(sys.argv) > 3: API_ID = int(sys.argv[3])
 if len(sys.argv) > 4: API_HASH = sys.argv[4]
 
+# ⛔ SESSION_STRING کاملاً حذف شد — هر کاربر سشن اختصاصی خودش را دارد
+# تا چندکاربره درست کار کند و سلفِ همه روی یک اکانت نیفتد
 session_name = f"sessions/{USER_ID}" if USER_ID else "self"
-# اگر متغیر SESSION_STRING (در Railway → Variables) ست باشد، لاگین از همان خوانده می‌شود
-# و با هر دیپلوی دیگر نیازی به لاگین مجدد نیست (فایل .session لازم نیست)
-SESSION_STRING = os.environ.get("SESSION_STRING")
-if SESSION_STRING:
-    app = Client("self", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
-else:
-    app = Client(session_name, api_id=API_ID, api_hash=API_HASH)
+app = Client(session_name, api_id=API_ID, api_hash=API_HASH)
 
-# --- کش get_me: هر get_me یک درخواست users.GetFullUser است و فراخوانی مکرر FLOOD_WAIT می‌دهد ---
+# --- کش get_me: فراخوانی مکرر باعث FLOOD_WAIT می‌شود؛ ۹۰ ثانیه کش می‌کنیم ---
 _orig_get_me = app.get_me
 _me_cache = {"me": None, "ts": 0.0}
 ME_CACHE_TTL = 90
@@ -59,11 +55,10 @@ async def _cached_get_me(*args, **kwargs):
                 _me_cache["me"] = await _orig_get_me()
                 _me_cache["ts"] = time.time()
             else:
-                _me_cache["ts"] = now + e.value   # تا پایان فلود از کش استفاده کن
+                _me_cache["ts"] = now + e.value
     return _me_cache["me"]
 
 app.get_me = _cached_get_me
-
 # ================== فایل‌ها و پوشه‌ها ==================
 SAVED_PHOTOS_DIR = "saved_photos"
 INSULTS_FILE = "insults.txt"
