@@ -44,14 +44,14 @@ active_clients = {}
 BOT_TOKEN = "8868043854:AAHblyKRa-DbGHefUp7q8_Zw675JTfBdgBw"
 ADMIN_ID = 8953488723
 
-SUPPORT_USERNAME = "Aliconfigs"
-BUY_CHANNEL_USERNAME = "SelfPersiangulf"
+SUPPORT_USERNAME = "AM1RHOSSEE1N"
+BUY_CHANNEL_USERNAME = "SelfPersian"
 HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
 
 os.makedirs("sessions", exist_ok=True)
 
 FORCE_CHANNELS = [
-    "SelfPersiangulf",
+    "SelfPersian",
 ]
 
 # ===== سیستم الماس 💎 =====
