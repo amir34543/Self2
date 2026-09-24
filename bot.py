@@ -1,4 +1,4 @@
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
 import json, os, asyncio, subprocess, sys, time, threading, random
@@ -23,6 +23,21 @@ async def safe_edit_message(message, *args, **kwargs):
         return await message.edit_text(*args, **kwargs)
     except MessageNotModified:
         return None
+
+# ==============================================================================
+# 🔄 لوپ اصلی ربات — برای ارسال پیام از داخل تردهای تایمر (بدون بلاک شدن)
+# ==============================================================================
+BOT_LOOP = None
+
+def send_async(coro):
+    """ارسال امن پیام از داخل تردهای غیر-async (مثل تایمر ساعتی الماس)"""
+    try:
+        if BOT_LOOP is not None and BOT_LOOP.is_running():
+            asyncio.run_coroutine_threadsafe(coro, BOT_LOOP)
+        else:
+            coro.close()
+    except Exception as e:
+        print(f"⚠️ خطا در ارسال پیام از ترد: {e}", flush=True)
 
 user_temp_codes = {}
 active_clients = {}
@@ -65,7 +80,7 @@ ACTIVATION_TEXT = """🚀 **فعالسازی**
 # ===== 🎰 گردونه شانس =====
 WHEEL_COOLDOWN = 86400              # روزی یک بار (ثانیه)
 WHEEL_PRIZES = [5, 10, 15, 20, 25, 30, 50, 100]
-WHEEL_WEIGHTS = [30, 25, 20, 12, 7, 4, 1.5, 0.5]   # هرچه بالاتر، شانس بیشتر
+WHEEL_WEIGHTS = [30, 25, 20, 12, 7, 4, 1.5, 0.5]
 
 # ===== 🏆 لیدربورد =====
 LEADERBOARD_PRIZES_TEXT = "💎 جوایزِ امشب: نفر اول ۲۰۰۰ / دوم ۱۰۰۰ / سوم ۵۰۰ الماس"
@@ -198,7 +213,8 @@ def make_backup_zip(out_path):
     return count_sessions
 
 async def apply_restore(path):
-    stop_all_selfbots()
+    """توقف همه سلف‌ها → جایگزینی فایل‌ها → رفرش دیتابیس → روشن کردن مجدد سلف‌های فعال"""
+    await asyncio.to_thread(stop_all_selfbots)
     restored_sessions = 0
     if path.endswith(".zip"):
         with zipfile.ZipFile(path) as z:
@@ -212,6 +228,7 @@ async def apply_restore(path):
         shutil.copyfile(path, "database.json")
 
     db.data = db.load_data()
+    # ⚠️ PIDهای داخل بکاپ مال ماشین قبلی است — پاک می‌شوند تا پروسه اشتباهی کشته نشود
     db.data["processes"] = {}
     db.data["timers"] = {}
     db.save_data()
@@ -223,7 +240,7 @@ async def apply_restore(path):
         except:
             continue
         if info.get("status") == "active" and db.get("credits", uid, 0) > 0:
-            if run_selfbot(uid, info.get("phone")):
+            if await run_selfbot_async(uid, info.get("phone")):
                 restarted += 1
     return restored_sessions, restarted
 
@@ -319,7 +336,7 @@ async def complete_login(client, user_id, temp):
 
     await asyncio.sleep(1)
 
-    if run_selfbot(user_id, temp["phone"]):
+    if await run_selfbot_async(user_id, temp["phone"]):
         credits = db.get("credits", user_id, 0)
         await client.send_message(
             user_id,
@@ -579,35 +596,30 @@ def deduct_diamond_callback(user_id):
         if credits > 0:
             new_credits = credits - 1
             db.set("credits", user_id, new_credits)
+            print(f"⏳ [الماس] کاربر {user_id}: ۱ الماس کسر شد | باقی‌مانده: {new_credits}", flush=True)
             if new_credits <= 0:
-                stop_selfbot(user_id)
+                stop_selfbot(user_id, reason="الماس تمام شد")
                 db.set("credits", user_id, 0)
-                try:
-                    bot.send_message(
-                        user_id,
-                        "💎 **الماس های شما تمام شد!**\n\n"
-                        "سلف بات متوقف شد.\n\n"
-                        "💎 برای ادامه استفاده، از طریق منوی «خرید الماس» حساب خود را شارژ کنید."
-                    )
-                except:
-                    pass
-            else:
-                if user_id in user_timers:
-                    user_timers[user_id].start()
-        else:
-            stop_selfbot(user_id)
-            db.set("credits", user_id, 0)
-            try:
-                bot.send_message(
+                send_async(bot.send_message(
                     user_id,
                     "💎 **الماس های شما تمام شد!**\n\n"
                     "سلف بات متوقف شد.\n\n"
                     "💎 برای ادامه استفاده، از طریق منوی «خرید الماس» حساب خود را شارژ کنید."
-                )
-            except:
-                pass
+                ))
+            else:
+                if user_id in user_timers:
+                    user_timers[user_id].start()
+        else:
+            stop_selfbot(user_id, reason="الماس صفر بود")
+            db.set("credits", user_id, 0)
+            send_async(bot.send_message(
+                user_id,
+                "💎 **الماس های شما تمام شد!**\n\n"
+                "سلف بات متوقف شد.\n\n"
+                "💎 برای ادامه استفاده، از طریق منوی «خرید الماس» حساب خود را شارژ کنید."
+            ))
     except Exception as e:
-        print(f"❌ خطا در deduct_diamond_callback: {e}")
+        print(f"❌ خطا در deduct_diamond_callback: {e}", flush=True)
 
 def run_selfbot(user_id, phone=None):
     try:
@@ -635,16 +647,16 @@ def run_selfbot(user_id, phone=None):
         with open(f"process_{user_id}.pid", "w") as f:
             f.write(str(pid))
 
-        print(f"✅ سلف‌بات برای کاربر {user_id} راه‌اندازی شد | PID: {pid}")
+        print(f"✅ سلف‌بات برای کاربر {user_id} راه‌اندازی شد | PID: {pid}", flush=True)
         if user_id not in user_timers:
             user_timers[user_id] = UserTimer(user_id, deduct_diamond_callback)
         user_timers[user_id].start()
         return True
     except Exception as e:
-        print(f"❌ خطا در اجرای سلف‌بات: {e}")
+        print(f"❌ خطا در اجرای سلف‌بات: {e}", flush=True)
         return False
 
-def stop_selfbot(user_id):
+def stop_selfbot(user_id, reason=""):
     try:
         if user_id in user_timers:
             user_timers[user_id].stop()
@@ -665,10 +677,10 @@ def stop_selfbot(user_id):
                 except:
                     pass
                 try:
+                    # ⚠️ الگوی دقیق تا پیشوند آیدی یک کاربر، پروسه کاربر دیگر را نکشد
                     subprocess.run(["pkill", "-f", f"self\\.py {user_id}( |$)"], capture_output=True, check=False)
                 except:
                     pass
-
             except Exception as e:
                 print(f"⚠️ خطا در قطع پروسس: {e}")
 
@@ -683,12 +695,12 @@ def stop_selfbot(user_id):
             except:
                 pass
 
-            print(f"✅ سلف‌بات کاربر {user_id} قطع شد (PID: {pid})")
+            print(f"🛑 سلف‌بات کاربر {user_id} متوقف شد (PID: {pid})" + (f" | دلیل: {reason}" if reason else ""), flush=True)
             return True
 
         return False
     except Exception as e:
-        print(f"❌ خطا در stop_selfbot: {e}")
+        print(f"❌ خطا در stop_selfbot: {e}", flush=True)
         return False
 
 def stop_all_selfbots():
@@ -709,6 +721,13 @@ def stop_all_selfbots():
         db.save_data()
     except:
         pass
+
+async def run_selfbot_async(user_id, phone=None):
+    """اجرای سلف بدون بلاک کردن ایونت‌لوپ بات"""
+    return await asyncio.to_thread(run_selfbot, user_id, phone)
+
+async def stop_selfbot_async(user_id, reason=""):
+    return await asyncio.to_thread(stop_selfbot, user_id, reason)
 
 # ==============================
 # انتقال الماس بین کاربران گروه
@@ -852,7 +871,6 @@ async def user_info(client, message: Message):
         user_data = db.get("users", target_id, {})
         credits = db.get("credits", target_id, 0)
         process = db.get("processes", target_id)
-        timer = db.get("timers", target_id)
         if not user_data:
             await message.reply_text("❌ کاربر یافت نشد")
             return
@@ -957,7 +975,6 @@ async def numpad_callback(client, callback_query):
 # 📱 فعالسازی: ارسال کد + کسر ۲ الماس (مشترک بین Contact و شماره تایپ‌شده)
 # ==============================================================================
 async def start_activation_with_phone(client, reply_target, uid, phone_digits):
-    """reply_target: پیامی که پاسخ/وضعیت زیر آن ارسال شود"""
     ok, chans = await check_force_join(client, uid)
     if not ok:
         rows = [[InlineKeyboardButton(f"📣 عضویت در {ch}", url=f"https://t.me/{ch}")] for ch in chans]
@@ -980,10 +997,10 @@ async def start_activation_with_phone(client, reply_target, uid, phone_digits):
     if not phone_digits.startswith("+"):
         phone_digits = "+" + phone_digits
 
-    status_msg = await reply_target.reply_text("📱 در حال ارسال کد تایید...") if hasattr(reply_target, "reply_text") else await client.send_message(uid, "📱 در حال ارسال کد تایید...")
+    status_msg = await reply_target.reply_text("📱 در حال ارسال کد تایید...")
 
-    # اگر سلف قبلی روشن است، اول خاموش شود (فایل سشن آزاد شود)
-    stop_selfbot(uid)
+    # اگر سلف قبلی روشن است، اول خاموش شود (فایل سشن آزاد شود) — بدون بلاک شدن بات
+    await stop_selfbot_async(uid)
     old = active_clients.pop(uid, None)
     if old:
         try:
@@ -1130,6 +1147,13 @@ async def private_photo_handler(client, message: Message):
         await message.reply_text("✅ رسید شما ارسال شد و در انتظار تایید مدیریت است.")
     except:
         await message.reply_text("❌ خطا در ارسال رسید. بعداً دوباره تلاش کنید.")
+
+# ==============================
+# 🏓 تست سلامت بات (قبل از روتر متن تا اولویت داشته باشد)
+# ==============================
+@bot.on_message(filters.command("ping") & filters.private)
+async def ping_cmd(client, message):
+    await message.reply_text(f"🏓 پونگ! بات زنده است ⏰ {time.strftime('%H:%M:%S')}")
 
 # ==============================
 # روتر پیام‌های متنی پیوی
@@ -1657,7 +1681,7 @@ async def callback_handler(client, callback_query):
         return
 
     if data == "stop_self":
-        if stop_selfbot(user_id):
+        if await stop_selfbot_async(user_id):
             await callback_query.answer("🛑 سلف شما خاموش شد.", show_alert=True)
         else:
             await callback_query.answer("ℹ️ سلف شما از قبل خاموش بود.", show_alert=True)
@@ -1698,7 +1722,7 @@ async def admin_callback_handler(client, callback_query):
         await callback_query.answer("📦 در حال ساخت بکاپ...")
         path = f"backup_{time.strftime('%Y%m%d_%H%M')}.zip"
         try:
-            n_sessions = make_backup_zip(path)
+            n_sessions = await asyncio.to_thread(make_backup_zip, path)
             size_kb = os.path.getsize(path) // 1024
             await client.send_document(
                 user_id, path,
@@ -1784,8 +1808,7 @@ async def admin_callback_handler(client, callback_query):
         await callback_query.answer()
     elif data == "admin_stop_all":
         await safe_edit_message(callback_query.message, "🛑 **در حال توقف همه سلف‌بات‌ها...**")
-        stop_all_selfbots()
-        await asyncio.sleep(1)
+        await asyncio.to_thread(stop_all_selfbots)
         await safe_edit_message(callback_query.message, "✅ **همه سلف‌بات‌ها متوقف شدند.**")
         await callback_query.answer()
     elif data == "admin_payments":
@@ -1844,7 +1867,7 @@ async def admin_callback_handler(client, callback_query):
         await callback_query.answer()
     elif data.startswith("stop_"):
         target_id = int(data.split("_")[1])
-        if stop_selfbot(target_id):
+        if await stop_selfbot_async(target_id):
             await safe_edit_message(callback_query.message, f"✅ سلف‌بات کاربر {target_id} متوقف شد.")
         else:
             await safe_edit_message(callback_query.message, f"ℹ️ سلف‌بات کاربر {target_id} از قبل متوقف بود.")
@@ -1979,6 +2002,44 @@ async def start_handler(client, message: Message):
             except:
                 pass
 
+# ==============================
+# 🔍 لاگ همه پیام‌های پیوی (برای عیب‌یابی)
+# ==============================
+@bot.on_message(filters.private, group=-100)
+async def _log_all_private(client, message):
+    try:
+        print(f"📩 پیام از {message.from_user.id}: {(message.text or 'مدیا')[:30]}", flush=True)
+    except:
+        pass
+
+# ==============================================================================
+# 🚀 استارت + ری‌استارت خودکار سلف‌های فعال پس از هر ری‌استارت بات
+# ==============================================================================
+async def _auto_restart_on_boot():
+    """اگر بات ری‌استارت شده بود، سلف‌های فعال را دوباره روشن می‌کند"""
+    await asyncio.sleep(8)
+    restarted = 0
+    for uid_s, info in db.get_all("users").items():
+        try:
+            uid = int(uid_s)
+        except:
+            continue
+        if info.get("status") == "active" and db.get("credits", uid, 0) > 0:
+            if await run_selfbot_async(uid, info.get("phone")):
+                restarted += 1
+    if restarted:
+        print(f"🚀 {restarted} سلف فعال پس از استارت بات دوباره راه‌اندازی شد", flush=True)
+
 if __name__ == "__main__":
-    print("🤖 ربات مدیریت سلف PersianGulf اجرا شد")
-    bot.run()
+    print("🤖 ربات مدیریت سلف PersianGulf اجرا شد", flush=True)
+
+    async def main():
+        global BOT_LOOP
+        BOT_LOOP = asyncio.get_running_loop()
+        await bot.start()
+        asyncio.create_task(_auto_restart_on_boot())
+        print("✅ بات آماده است", flush=True)
+        await idle()
+        await bot.stop()
+
+    bot.run(main())
