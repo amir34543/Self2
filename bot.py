@@ -59,6 +59,7 @@ DIAMOND_RATE = 1440                 # 1440 الماس = 1 ماه (50,000 توم�
 PRICE_PER_MONTH = 50000             # تومان
 TOMAN_PER_DIAMOND = PRICE_PER_MONTH / DIAMOND_RATE
 ACTIVATION_COST = 2                 # ⚡ هزینه فعالسازی سلف (الماس)
+BET_TAX = 0.06                      # مالیات ۶٪ شرط/دوز
 card_info = {
     "card_number": "6037-1234-1234-1234",
     "card_owner": "نام صاحب کارت",
@@ -82,8 +83,15 @@ WHEEL_COOLDOWN = 86400              # روزی یک بار (ثانیه)
 WHEEL_PRIZES = [5, 10, 15, 20, 25, 30, 50, 100]
 WHEEL_WEIGHTS = [30, 25, 20, 12, 7, 4, 1.5, 0.5]
 
-# ===== 🏆 لیدربورد =====
+# ===== 🏆 لیدربورد روزانه شرطبندی =====
+LEADERBOARD_RESET = 86400           # ریست هر ۲۴ ساعت
 LEADERBOARD_PRIZES_TEXT = "💎 جوایزِ امشب: نفر اول ۲۰۰۰ / دوم ۱۰۰۰ / سوم ۵۰۰ الماس"
+
+# ===== 🎮 دوز (Tic-Tac-Toe) =====
+DOZ_EMPTY = "➖"
+DOZ_JOIN_TIMEOUT = 300              # ۵ دقیقه فرصت برای پیوستن حریف
+DOZ_MOVE_TIMEOUT = 600              # ۱۰ دقیقه حداکثر مدت هر بازی
+DOZ_WIN_LINES = [(0, 1, 2), (3, 4, 5), (6, 7, 8), (0, 3, 6), (1, 4, 7), (2, 5, 8), (0, 4, 8), (2, 4, 6)]
 
 # ===== سیستم چند API_ID برای جلوگیری از محدودیت تلگرام =====
 API_CREDENTIALS = [
@@ -118,8 +126,9 @@ class JSONDatabase:
                     "timers": {},
                     "payments": {},
                     "group_bets": {},
+                    "doz_games": {},
                     "last_spin": {},
-                    "last_play": {},
+                    "daily_bets": {},
                     "settings": {
                         "diamond_rate": DIAMOND_RATE,
                         "toman_per_diamond": TOMAN_PER_DIAMOND,
@@ -132,8 +141,8 @@ class JSONDatabase:
             return {
                 "users": {}, "processes": {}, "temp_data": {},
                 "credits": {}, "timers": {},
-                "payments": {}, "group_bets": {},
-                "last_spin": {}, "last_play": {}, "settings": {}
+                "payments": {}, "group_bets": {}, "doz_games": {},
+                "last_spin": {}, "daily_bets": {}, "settings": {}
             }
 
     def save_data(self, data=None):
@@ -192,6 +201,59 @@ user_timers = {}
 def save_bet_doz_image(file_id):
     db.data["bet_doz_image"] = file_id
     return db.save_data()
+
+# ==============================================================================
+# 🏆 آمار روزانه شرطبندی (برای لیدربورد) — ریست خودکار هر ۲۴ ساعت
+# ==============================================================================
+def _maybe_reset_daily_bets():
+    now = time.time()
+    last_reset = db.data.get("daily_reset_ts", 0) or 0
+    if now - last_reset >= LEADERBOARD_RESET:
+        db.data["daily_bets"] = {}
+        db.data["daily_reset_ts"] = now
+        db.save_data()
+        print("🔄 لیدربورد روزانه ریست شد", flush=True)
+
+def _record_daily_bet(user_id, amount):
+    try:
+        _maybe_reset_daily_bets()
+        stats = db.get("daily_bets", user_id, None) or {"games": 0, "wagered": 0, "won": 0}
+        stats["games"] = int(stats.get("games", 0)) + 1
+        stats["wagered"] = int(stats.get("wagered", 0)) + int(amount)
+        db.set("daily_bets", user_id, stats)
+    except Exception as e:
+        print(f"⚠️ خطا در ثبت آمار شرط: {e}", flush=True)
+
+def _record_daily_win(user_id, pot):
+    try:
+        _maybe_reset_daily_bets()
+        stats = db.get("daily_bets", user_id, None) or {"games": 0, "wagered": 0, "won": 0}
+        stats["won"] = int(stats.get("won", 0)) + int(pot)
+        db.set("daily_bets", user_id, stats)
+    except Exception as e:
+        print(f"⚠️ خطا در ثبت برد: {e}", flush=True)
+
+def _cancel_daily_bet(user_id, amount):
+    try:
+        stats = db.get("daily_bets", user_id, None)
+        if stats:
+            stats["games"] = max(0, int(stats.get("games", 0)) - 1)
+            stats["wagered"] = max(0, int(stats.get("wagered", 0)) - int(amount))
+            db.set("daily_bets", user_id, stats)
+    except Exception as e:
+        print(f"⚠️ خطا در حذف آمار شرط: {e}", flush=True)
+
+# ==============================================================================
+# 🛠 ویرایش امن پیام شرط/دوز — هم متن و هم کپشن عکس را پشتیبانی می‌کند
+# ==============================================================================
+async def edit_bet_message(client, chat_id, message_id, text, reply_markup=None):
+    try:
+        await client.edit_message_text(chat_id, message_id, text, reply_markup=reply_markup, parse_mode=enums.ParseMode.HTML)
+    except Exception:
+        try:
+            await client.edit_message_caption(chat_id, message_id, text, reply_markup=reply_markup, parse_mode=enums.ParseMode.HTML)
+        except Exception:
+            pass
 
 # ==============================================================================
 # 💾 بکاپ و بازگردانی کامل (دیتابیس + سشن‌ها + فایل‌های وضعیت سلف‌ها)
@@ -406,7 +468,11 @@ async def handle_code_from_keyboard(client, code_message):
         else:
             await client.send_message(user_id, f"❌ **خطا:** {error_msg}")
 
+# ==============================================================================
+# ⚡ شرطبندی — نتیجه فوری (بدون انتظار)
+# ==============================================================================
 async def cancel_group_bet_if_no_joiner(client, bet_key):
+    """اگر ۵ دقیقه کسی به شرط پیوست، لغو و برگشت پول"""
     await asyncio.sleep(300)
 
     bet_data = db.get("group_bets", bet_key)
@@ -429,6 +495,7 @@ async def cancel_group_bet_if_no_joiner(client, bet_key):
 
     creator_credits = db.get("credits", creator_id, 0)
     db.set("credits", creator_id, creator_credits + amount)
+    _cancel_daily_bet(creator_id, amount)
 
     bet_data["finished"] = True
     bet_data["is_active"] = False
@@ -441,11 +508,7 @@ async def cancel_group_bet_if_no_joiner(client, bet_key):
         f"💎 مبلغ شرط: <code>{amount:,}</code> الماس\n"
         "💸 مبلغ به سازنده برگشت داده شد."
     )
-
-    try:
-        await client.edit_message_text(chat_id, message_id, text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-    except:
-        pass
+    await edit_bet_message(client, chat_id, message_id, text)
 
     try:
         await client.send_message(
@@ -460,8 +523,7 @@ async def cancel_group_bet_if_no_joiner(client, bet_key):
         pass
 
 async def finish_group_bet(client, bet_key):
-    await asyncio.sleep(5)
-
+    """نتیجه‌گیری فوری شرط — مستقیماً برنده مشخص و پیام نهایی ارسال می‌شود"""
     bet_data = db.get("group_bets", bet_key)
     if not bet_data or bet_data.get("finished"):
         return
@@ -479,6 +541,7 @@ async def finish_group_bet(client, bet_key):
             creator_credits = db.get("credits", creator_id, 0)
             db.set("credits", creator_id, creator_credits + amount)
             bet_data["refunded"] = True
+            _cancel_daily_bet(creator_id, amount)
 
         bet_data["finished"] = True
         bet_data["is_active"] = False
@@ -489,10 +552,7 @@ async def finish_group_bet(client, bet_key):
             f"💎 مبلغ هر نفر: <code>{amount:,}</code> الماس\n"
             f"👤 سازنده: {creator_mention}"
         )
-        try:
-            await client.edit_message_text(chat_id, message_id, text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-        except:
-            pass
+        await edit_bet_message(client, chat_id, message_id, text)
         return
 
     players = [{"id": creator_id, "name": bet_data.get('creator_name', 'کاربر')}] + participants
@@ -503,7 +563,7 @@ async def finish_group_bet(client, bet_key):
         player_mentions.append(f'<a href="tg://user?id={p["id"]}"><b>{p_name}</b></a>')
 
     gross_pot = (1 + len(participants)) * amount
-    tax = int(gross_pot * 0.06)  # مالیات ۶٪ از مجموع شرط
+    tax = int(gross_pot * BET_TAX)
     pot = gross_pot - tax
 
     winner_index = random.choice(range(len(players)))
@@ -513,6 +573,8 @@ async def finish_group_bet(client, bet_key):
     loser = players[loser_index] if loser_index is not None else None
     winner_credits = db.get("credits", winner_id, 0) + pot
     db.set("credits", winner_id, winner_credits)
+
+    _record_daily_win(winner_id, pot)
 
     bet_data["finished"] = True
     bet_data["is_active"] = False
@@ -532,11 +594,7 @@ async def finish_group_bet(client, bet_key):
         f"<b>𝐕𝐈𝐏</b> | <b>مالیات:</b> {tax:,} الماس\n"
         "◈ ━━━ <b>selfisaz PersianGulf</b> ━━━ ◈"
     )
-
-    try:
-        await client.edit_message_text(chat_id, message_id, result_text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-    except:
-        pass
+    await edit_bet_message(client, chat_id, message_id, result_text)
 
     try:
         await client.send_message(
@@ -571,6 +629,220 @@ async def finish_group_bet(client, bet_key):
                 )
             except:
                 pass
+
+# ==============================================================================
+# 🎮 دوز (Tic-Tac-Toe) — بازی صفحه‌ای زیبا با دکمه‌های واقعی
+# ==============================================================================
+def _doz_cell_mark(v):
+    return "❌" if v == "X" else ("⭕" if v == "O" else DOZ_EMPTY)
+
+def _doz_board_text(board):
+    rows = []
+    for r in range(3):
+        rows.append("  ".join(_doz_cell_mark(board[r * 3 + c]) for c in range(3)))
+    return "\n".join(rows)
+
+def _doz_check(board):
+    """برنده ('X'/'O')، مساوی ('D') یا None (بازی ادامه دارد)"""
+    for a, b, c in DOZ_WIN_LINES:
+        if board[a] != "E" and board[a] == board[b] == board[c]:
+            return board[a]
+    if "E" not in board:
+        return "D"
+    return None
+
+def _doz_game_text(game):
+    board = game["board"]
+    turn_mark = "❌" if game["turn"] == "X" else "⭕"
+    turn_name = game["x_name"] if game["turn"] == "X" else game["o_name"]
+    pot = game["amount"] * 2
+    tax = int(pot * BET_TAX)
+    prize = pot - tax
+    return (
+        "<b>◈ ━━━ 🎮 دوز PersianGulf ━━━ ◈</b>\n"
+        f"<b>𝐕𝐈𝐏</b> | شرط هر نفر: <code>{game['amount']:,}</code> الماس\n"
+        f"<b>𝐕𝐈𝐏</b> | 🏆 جایزه برنده: <code>{prize:,}</code> الماس\n"
+        f"<b>𝐕𝐈𝐏</b> | ❌ {html.escape(game['x_name'])}\n"
+        f"<b>𝐕𝐈𝐏</b> | ⭕ {html.escape(game['o_name'])}\n"
+        f"<b>𝐕𝐈𝐏</b> | 🎯 نوبت: {turn_mark} <b>{html.escape(turn_name)}</b>\n"
+        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+        f"{_doz_board_text(board)}\n"
+        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+        "🎯 روی خانه‌ای که می‌خواهی بزن!"
+    )
+
+def _doz_board_keyboard(key):
+    game = db.get("doz_games", key) or {}
+    board = game.get("board", ["E"] * 9)
+    rows = []
+    for r in range(3):
+        row = []
+        for c in range(3):
+            i = r * 3 + c
+            label = _doz_cell_mark(board[i])
+            row.append(InlineKeyboardButton(label, callback_data=f"dozmove_{key}_{i}"))
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+async def doz_no_joiner_timeout(client, key):
+    """اگر ۵ دقیقه کسی به دوز پیوست، لغو و برگشت پول"""
+    await asyncio.sleep(DOZ_JOIN_TIMEOUT)
+    game = db.get("doz_games", key)
+    if not game or game.get("started") or game.get("finished"):
+        return
+    game["finished"] = True
+    game["refunded"] = True
+    db.set("doz_games", key, game)
+    db.set("credits", game["creator_id"], db.get("credits", game["creator_id"], 0) + game["amount"])
+    _cancel_daily_bet(game["creator_id"], game["amount"])
+    chat_s, msg_s = key.split("_", 1)
+    text = (
+        "⛔ <b>بازی دوز لغو شد</b>\n\n"
+        "کسی به بازی پیوست نکرد و مبلغ به سازنده برگشت داده شد 💸"
+    )
+    await edit_bet_message(client, int(chat_s), int(msg_s), text)
+
+async def doz_game_timeout(client, key):
+    """اگر بازی ۱۰ دقیقه تمام نشد، لغو و برگشت پول هر دو بازیکن"""
+    await asyncio.sleep(DOZ_MOVE_TIMEOUT)
+    game = db.get("doz_games", key)
+    if not game or game.get("finished"):
+        return
+    game["finished"] = True
+    game["refunded"] = True
+    db.set("doz_games", key, game)
+    for uid_ in (game.get("x_id"), game.get("o_id")):
+        if uid_:
+            db.set("credits", uid_, db.get("credits", uid_, 0) + game["amount"])
+    chat_s, msg_s = key.split("_", 1)
+    text = (
+        "⏰ <b>بازی دوز به دلیل عدم فعالیت لغو شد</b>\n\n"
+        f"💎 مبلغ به هر دو بازیکن برگشت داده شد.\n"
+        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+        f"{_doz_board_text(game['board'])}"
+    )
+    await edit_bet_message(client, int(chat_s), int(msg_s), text)
+
+async def _doz_finish(client, key, game, res):
+    """پایان بازی: تعیین برنده / مساوی و پرداخت"""
+    game["finished"] = True
+    db.set("doz_games", key, game)
+    chat_s, msg_s = key.split("_", 1)
+    amount = game["amount"]
+    board = game["board"]
+
+    if res == "D":
+        # 🤝 مساوی: برگشت کامل پول هر دو
+        for uid_ in (game["x_id"], game["o_id"]):
+            db.set("credits", uid_, db.get("credits", uid_, 0) + amount)
+        text = (
+            "<b>◈ ━━━ 🤝 نتیجه دوز ━━━ ◈</b>\n"
+            "<b>𝐕𝐈𝐏</b> | بازی مساوی شد!\n"
+            f"<b>𝐕𝐈𝐏</b> | 💎 <code>{amount:,}</code> الماس به هر دو بازیکن برگشت داده شد\n"
+            "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+            f"{_doz_board_text(board)}\n"
+            "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+            "<b>◈ ━━━ PersianGulf ━━━ ◈</b>"
+        )
+        await edit_bet_message(client, int(chat_s), int(msg_s), text)
+        return
+
+    winner_id = game["x_id"] if res == "X" else game["o_id"]
+    winner_name = game["x_name"] if res == "X" else game["o_name"]
+    winner_mark = "❌" if res == "X" else "⭕"
+    loser_id = game["o_id"] if res == "X" else game["x_id"]
+    loser_name = game["o_name"] if res == "X" else game["x_name"]
+
+    pot = amount * 2
+    tax = int(pot * BET_TAX)
+    prize = pot - tax
+    db.set("credits", winner_id, db.get("credits", winner_id, 0) + prize)
+    _record_daily_win(winner_id, prize)
+
+    text = (
+        "<b>◈ ━━━ 🏆 نتیجه دوز ━━━ ◈</b>\n"
+        f"<b>𝐕𝐈𝐏</b> | 🏆 برنده: {winner_mark} <b>{html.escape(winner_name)}</b>\n"
+        f"<b>𝐕𝐈𝐏</b> | 💔 بازنده: {html.escape(loser_name)}\n"
+        f"<b>𝐕𝐈𝐏</b> | 💎 جایزه: <code>{prize:,}</code> الماس\n"
+        f"<b>𝐕𝐈𝐏</b> | 💵 مالیات: <code>{tax:,}</code> الماس\n"
+        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+        f"{_doz_board_text(board)}\n"
+        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+        "<b>◈ ━━━ PersianGulf ━━━ ◈</b>"
+    )
+    await edit_bet_message(client, int(chat_s), int(msg_s), text)
+
+    try:
+        await client.send_message(
+            winner_id,
+            f"🎮🏆 **تو بازی دوز رو بردی!**\n\n"
+            f"💎 جایزه: <b>{prize:,}</b> الماس\n"
+            f"📊 موجودی جدید: <code>{db.get('credits', winner_id, 0):,}</code> الماس"
+        )
+    except:
+        pass
+
+@bot.on_message(filters.group & filters.regex(r'^دوز\s+(\d+)(?:\s*الماس)?$'))
+async def doz_start_handler(client, message: Message):
+    chat_id = message.chat.id
+    creator_id = message.from_user.id
+    try:
+        amount = int(message.matches[0].group(1))
+    except:
+        return
+    if amount <= 0:
+        await message.reply_text("❌ مقدار شرط دوز باید بیشتر از صفر باشد.")
+        return
+    creator_credits = db.get("credits", creator_id, 0)
+    if creator_credits < amount:
+        await message.reply_text(f"❌ الماس کافی برای دوز ندارید.\n💎 موجودی شما: {creator_credits:,} الماس")
+        return
+
+    db.set("credits", creator_id, creator_credits - amount)
+    _record_daily_bet(creator_id, amount)
+
+    creator_first_name = html.escape(message.from_user.first_name or 'کاربر')
+    creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
+    doz_text = (
+        "<b>◈ ━━━ 🎮 دوز PersianGulf ━━━ ◈</b>\n"
+        f"<b>𝐕𝐈𝐏</b> | شرط: <code>{amount:,}</code> الماس\n"
+        f"<b>𝐕𝐈𝐏</b> | ❌ سازنده: {creator_mention}\n"
+        "<b>𝐕𝐈𝐏</b> | ⏳ در انتظار حریف...\n"
+        "<b>◈ ━━━ ━━━ ━━━ ━━━</b>"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎮 پیوستن به دوز", callback_data=f"dozjoin_waiting", style=KeyboardButtonStyle(bg_success=True)),
+            InlineKeyboardButton("❌ لغو", callback_data=f"dozcancel_waiting", style=KeyboardButtonStyle(bg_danger=True))
+        ]
+    ])
+    bet_image = db.data.get("bet_doz_image")
+    if bet_image:
+        doz_msg = await message.reply_photo(photo=bet_image, caption=doz_text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
+    else:
+        doz_msg = await message.reply_text(doz_text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
+
+    key = f"{chat_id}_{doz_msg.id}"
+    game = {
+        "chat_id": chat_id, "message_id": doz_msg.id, "amount": amount,
+        "creator_id": creator_id, "creator_name": message.from_user.first_name or "کاربر",
+        "started": False, "finished": False, "refunded": False,
+        "board": ["E"] * 9, "turn": "X", "created_at": time.time()
+    }
+    db.set("doz_games", key, game)
+
+    # ⚡ جایگزینی callback_data واقعی (چون key بعد از ارسال مشخص شد)
+    try:
+        await doz_msg.edit_reply_markup(InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🎮 پیوستن به دوز", callback_data=f"dozjoin_{key}", style=KeyboardButtonStyle(bg_success=True)),
+                InlineKeyboardButton("❌ لغو", callback_data=f"dozcancel_{key}", style=KeyboardButtonStyle(bg_danger=True))
+            ]
+        ]))
+    except:
+        pass
+
+    asyncio.create_task(doz_no_joiner_timeout(client, key))
 
 async def check_force_join(client, user_id):
     not_joined = []
@@ -677,7 +949,6 @@ def stop_selfbot(user_id, reason=""):
                 except:
                     pass
                 try:
-                    # ⚠️ الگوی دقیق تا پیشوند آیدی یک کاربر، پروسه کاربر دیگر را نکشد
                     subprocess.run(["pkill", "-f", f"self\\.py {user_id}( |$)"], capture_output=True, check=False)
                 except:
                     pass
@@ -731,7 +1002,6 @@ async def stop_selfbot_async(user_id, reason=""):
 
 # ==============================================================================
 # ⚠️ ترتیب هندلرها مهم است! هندلرهای اختصاصی باید قبل از روتر کلی ثبت شوند
-# چون در Pyrogram در هر گروه فقط اولین هندلری که فیلترش بخورد اجرا می‌شود
 # ==============================================================================
 
 # ==============================
@@ -828,7 +1098,7 @@ async def group_bet_handler(client, message: Message):
         await message.reply_text(f"❌ الماس کافی برای ساخت شرط ندارید.\n💎 موجودی شما: {creator_credits:,} الماس")
         return
     db.set("credits", creator_id, creator_credits - amount)
-    db.set("last_play", creator_id, time.time())
+    _record_daily_bet(creator_id, amount)
     creator_first_name = html.escape(message.from_user.first_name or 'کاربر')
     creator_mention = f'<a href="tg://user?id={creator_id}"><b>{creator_first_name}</b></a>'
     bet_text = (
@@ -850,7 +1120,7 @@ async def group_bet_handler(client, message: Message):
     bet_data = {
         "chat_id": chat_id, "message_id": bet_msg.id, "amount": amount, "creator_id": creator_id,
         "creator_name": message.from_user.first_name or "", "creator_username": message.from_user.username or "",
-        "participants": [], "is_active": True, "finished": False, "timer_started": False,
+        "participants": [], "is_active": True, "finished": False,
         "created_at": time.time(), "refunded": False
     }
     db.set("group_bets", bet_key, bet_data)
@@ -977,7 +1247,7 @@ async def numpad_callback(client, callback_query):
             await callback_query.answer("❌ کد کامل شده است! روی 'ارسال' کلیک کنید", show_alert=True)
 
 # ==============================================================================
-# 📱 فعالسازی: ارسال کد + کسر ۲ الماس (مشترک بین Contact و شماره تایپ‌شده)
+# 📱 فعالسازی: ارسال کد + کسر ۲ الماس
 # ==============================================================================
 async def start_activation_with_phone(client, reply_target, uid, phone_digits):
     ok, chans = await check_force_join(client, uid)
@@ -1004,7 +1274,6 @@ async def start_activation_with_phone(client, reply_target, uid, phone_digits):
 
     status_msg = await reply_target.reply_text("📱 در حال ارسال کد تایید...")
 
-    # اگر سلف قبلی روشن است، اول خاموش شود (فایل سشن آزاد شود) — بدون بلاک شدن بات
     await stop_selfbot_async(uid)
     old = active_clients.pop(uid, None)
     if old:
@@ -1026,7 +1295,6 @@ async def start_activation_with_phone(client, reply_target, uid, phone_digits):
             "api_hash": api["api_hash"]
         })
 
-        # 💙 کسر هزینه فعالسازی
         new_balance = db.get("credits", uid, 0) - ACTIVATION_COST
         db.set("credits", uid, max(0, new_balance))
 
@@ -1051,15 +1319,11 @@ async def start_activation_with_phone(client, reply_target, uid, phone_digits):
         else:
             await status_msg.edit_text(f"❌ **خطا:** {err}")
 
-# ==============================================================================
-# 📱 دریافت شماره از دکمه اشتراک‌گذاری تلگرام (Contact)
-# ==============================================================================
 @bot.on_message(filters.private & filters.contact)
 async def contact_share_handler(client, message: Message):
     uid = message.from_user.id
     c = message.contact
 
-    # فقط شماره خود کاربر قابل قبول است
     if c.user_id and c.user_id != uid:
         await message.reply_text("❌ فقط **شماره خودتان** را به اشتراک بگذارید!")
         return
@@ -1200,14 +1464,13 @@ async def start_handler(client, message: Message):
                 pass
 
 # ==============================
-# روتر پیام‌های متنی پیوی — باید آخرین هندلر متنی باشد (بعد از همه دستورها)
+# روتر پیام‌های متنی پیوی — باید آخرین هندلر متنی باشد
 # ==============================
 @bot.on_message(filters.private & filters.text)
 async def private_text_router(client, message: Message):
     uid = message.from_user.id
     t = (message.text or "").strip()
 
-    # دستورات توسط هندلرهای اختصاصی بالاتر پردازش می‌شوند؛ اینجا فقط /cancel
     if t.startswith("/"):
         if t.startswith("/cancel"):
             admin_restore_wait.discard(uid)
@@ -1332,7 +1595,7 @@ async def private_text_router(client, message: Message):
                 db.delete("temp_data", uid)
         return
 
-    # ---------- شماره تلفن تایپ‌شده (فالبک؛ روش اصلی دکمه اشتراک‌گذاری است) ----------
+    # ---------- شماره تلفن تایپ‌شده (فالبک) ----------
     phone_digits = re.sub(r'[\s\-()]', '', t)
     if re.fullmatch(r'\+?\d{10,14}', phone_digits):
         if not phone_digits.startswith("+"):
@@ -1391,57 +1654,65 @@ async def lucky_wheel_handler(client, callback_query):
         pass
 
 # ==============================
-# 🏆 لیدربورد
+# 🏆 لیدربورد روزانه شرطبندی — ریست خودکار هر ۲۴ ساعت
 # ==============================
 async def leaderboard_handler(client, callback_query):
     user_id = callback_query.from_user.id
-    credits_all = db.get_all("credits")
+
+    _maybe_reset_daily_bets()
+
+    daily = db.data.get("daily_bets", {}) or {}
     users_all = db.get_all("users")
 
-    ranked = sorted(((int(k), int(v)) for k, v in credits_all.items()), key=lambda x: x[1], reverse=True)
+    ranked = sorted(
+        ((int(k), int((v or {}).get("won", 0)), int((v or {}).get("wagered", 0)), int((v or {}).get("games", 0)))
+         for k, v in daily.items()),
+        key=lambda x: (x[1], x[2]),
+        reverse=True
+    )
 
     medals = ["🥇", "🥈", "🥉"]
     lines = []
     shown = 0
-    for uid_, bal in ranked:
+    for uid_, won_, wagered_, games_ in ranked:
         if shown >= 10:
             break
-        if bal <= 0:
+        if games_ <= 0 and won_ <= 0:
             continue
         info = users_all.get(str(uid_), {}) or {}
         name = (info.get("first_name") or "کاربر")[:22]
         name = html.escape(name)
         rank_icon = medals[shown] if shown < 3 else f"**{shown + 1}.**"
-        lines.append(f"{rank_icon} <a href=\"tg://user?id={uid_}\">{name}</a> — 💎 {bal:,}")
+        lines.append(f"{rank_icon} <a href=\"tg://user?id={uid_}\">{name}</a>\n"
+                     f"     🏆 برد: {won_:,} | 🎮 {games_} بازی | 📊 شرط: {wagered_:,}")
         shown += 1
 
     if not lines:
-        lines.append("هنوز کسی در جدول نیست — اولین نفر باش! 🚀")
+        lines.append("🎲 امروز هنوز کسی شرط نبسته — اولین نفر باش!")
 
-    today_start = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d"))
-    last_play = db.get("last_play", user_id, 0) or 0
-    if last_play >= today_start:
-        play_line = "🎮 امروز بازی کردی! ادامه بده 💪"
+    now = time.time()
+    remaining = max(0, LEADERBOARD_RESET - (now - (db.data.get("daily_reset_ts", 0) or 0)))
+    h = int(remaining // 3600)
+    m = int((remaining % 3600) // 60)
+
+    my = daily.get(str(user_id)) or {}
+    if my.get("games"):
+        play_line = f"🎮 امروز {my.get('games')} بازی کردی و 🏆 {my.get('won', 0):,} برد داشتی — ادامه بده 💪"
     else:
         play_line = "🎮 تو امروز هنوز بازی نکردی — یه بازی بزن تا وارد جدول بشی!"
 
     lb_text = (
-        "🏆 **لیدربورد — برترین‌های PersianGulf**\n\n"
+        "🏆 **لیدربورد امروز — برترین شرط‌بندها**\n\n"
         + "\n".join(lines)
+        + "\n\n📈 امتیازها: 🏆 مجموع برد | 🎮 تعداد بازی | 📊 مجموع شرط"
+        + f"\n⏳ ریست جدول: **{h} ساعت و {m} دقیقه** دیگر"
         + "\n\n" + play_line
         + "\n" + LEADERBOARD_PRIZES_TEXT
     )
 
-    my_rank = None
-    for idx, (uid_, bal) in enumerate(ranked, 1):
-        if uid_ == user_id:
-            my_rank = idx
-            break
-    if my_rank:
-        lb_text += f"\n\n📍 رتبه شما: **#{my_rank}** با 💎 {db.get('credits', user_id, 0):,} الماس"
-
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🎰 گردونه شانس", callback_data="lucky_wheel", style=KeyboardButtonStyle(bg_success=True))],
+        [InlineKeyboardButton("🔄 تازه‌سازی", callback_data="leaderboard", style=KeyboardButtonStyle(bg_primary=True))],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
     ])
     await safe_edit_message(callback_query.message, lb_text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
@@ -1452,11 +1723,13 @@ async def callback_handler(client, callback_query):
     user_id = callback_query.from_user.id
     data = callback_query.data or ""
 
-    if data in ("joinbet_waiting", "cancelbet_waiting"):
-        await callback_query.answer("⏳ در حال آماده‌سازی شرط، لحظه‌ای صبر کنید...")
+    if data in ("joinbet_waiting", "cancelbet_waiting", "dozjoin_waiting", "dozcancel_waiting"):
+        await callback_query.answer("⏳ در حال آماده‌سازی، لحظه‌ای صبر کنید...")
         return
 
-    # ---------- پیوستن / لغو شرط‌بندی ----------
+    # ==========================================================
+    # ⚡ شرطبندی — پیوستن با نتیجه فوری
+    # ==========================================================
     if data.startswith("joinbet_"):
         try:
             _, chat_s, msg_s = data.split("_")
@@ -1476,30 +1749,15 @@ async def callback_handler(client, callback_query):
                 await callback_query.answer(f"❌ الماس کافی ندارید. موجودی: {credits:,}", show_alert=True)
                 return
             db.set("credits", user_id, credits - bet["amount"])
-            db.set("last_play", user_id, time.time())
+            _record_daily_bet(user_id, bet["amount"])
             bet.setdefault("participants", []).append({
                 "id": user_id,
                 "name": callback_query.from_user.first_name or "کاربر"
             })
-            if not bet.get("timer_started"):
-                bet["timer_started"] = True
-                db.set("group_bets", key, bet)
-                asyncio.create_task(finish_group_bet(client, key))
-            else:
-                db.set("group_bets", key, bet)
-            joined_text = (
-                "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>\n"
-                f"<b>𝐕𝐈𝐏</b> | شرطبندی : <code>{bet['amount']:,}</code> الماس\n"
-                f"<b>𝐕𝐈𝐏</b> | سازنده: {html.escape(bet.get('creator_name','کاربر'))}\n"
-                f"<b>𝐕𝐈𝐏</b> | حریف: {html.escape(callback_query.from_user.first_name or 'کاربر')}\n"
-                "⏳ در حال تعیین برنده...\n"
-                "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>"
-            )
-            try:
-                await client.edit_message_text(int(chat_s), int(msg_s), joined_text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-            except:
-                pass
-            await callback_query.answer("✅ به شرط پیوستید! موفق باشی 🍀")
+            db.set("group_bets", key, bet)
+            await callback_query.answer("✅ پیوستید! داره محاسبه میشه... 🎲")
+            # ⚡ نتیجه فوری — بدون انتظار و بدون پیام «در حال تعیین برنده»
+            await finish_group_bet(client, key)
         except Exception as e:
             await callback_query.answer(f"⚠️ خطا: {str(e)[:80]}", show_alert=True)
         return
@@ -1518,6 +1776,7 @@ async def callback_handler(client, callback_query):
             if not bet.get("refunded"):
                 db.set("credits", user_id, db.get("credits", user_id, 0) + bet["amount"])
                 bet["refunded"] = True
+                _cancel_daily_bet(user_id, bet["amount"])
             bet["finished"] = True
             bet["is_active"] = False
             db.set("group_bets", key, bet)
@@ -1527,11 +1786,114 @@ async def callback_handler(client, callback_query):
                 "💸 مبلغ به سازنده برگشت داده شد.\n"
                 "<b>◈ ━ selfisaz PersianGulf ━ ◈</b>"
             )
-            try:
-                await client.edit_message_text(int(chat_s), int(msg_s), cancel_text, reply_markup=None, parse_mode=enums.ParseMode.HTML)
-            except:
-                pass
+            await edit_bet_message(client, int(chat_s), int(msg_s), cancel_text)
             await callback_query.answer("✅ شرط لغو و مبلغ برگشت داده شد.")
+        except Exception as e:
+            await callback_query.answer(f"⚠️ خطا: {str(e)[:80]}", show_alert=True)
+        return
+
+    # ==========================================================
+    # 🎮 دوز — پیوستن / لغو / حرکت
+    # ==========================================================
+    if data.startswith("dozjoin_"):
+        try:
+            _, chat_s, msg_s = data.split("_", 2)
+            key = f"{chat_s}_{msg_s}"
+            game = db.get("doz_games", key)
+            if not game or game.get("finished") or game.get("started"):
+                await callback_query.answer("⛔ این بازی در دسترس نیست.", show_alert=True)
+                return
+            if game["creator_id"] == user_id:
+                await callback_query.answer("❌ نمی‌توانی با خودت بازی کنی!", show_alert=True)
+                return
+            credits = db.get("credits", user_id, 0)
+            if credits < game["amount"]:
+                await callback_query.answer(f"❌ الماس کافی ندارید. موجودی: {credits:,}", show_alert=True)
+                return
+            db.set("credits", user_id, credits - game["amount"])
+            _record_daily_bet(user_id, game["amount"])
+
+            game["started"] = True
+            game["board"] = ["E"] * 9
+            game["turn"] = "X"
+            game["x_id"] = game["creator_id"]
+            game["x_name"] = game["creator_name"]
+            game["o_id"] = user_id
+            game["o_name"] = callback_query.from_user.first_name or "کاربر"
+            db.set("doz_games", key, game)
+
+            asyncio.create_task(doz_game_timeout(client, key))
+
+            await edit_bet_message(client, int(chat_s), int(msg_s), _doz_game_text(game), _doz_board_keyboard(key))
+            await callback_query.answer("🎮 بازی شروع شد! تو ⭕ هستی", show_alert=True)
+        except Exception as e:
+            await callback_query.answer(f"⚠️ خطا: {str(e)[:80]}", show_alert=True)
+        return
+
+    if data.startswith("dozcancel_"):
+        try:
+            _, chat_s, msg_s = data.split("_", 2)
+            key = f"{chat_s}_{msg_s}"
+            game = db.get("doz_games", key)
+            if not game or game.get("finished") or game.get("started"):
+                await callback_query.answer("⛔ این بازی در دسترس نیست.", show_alert=True)
+                return
+            if game["creator_id"] != user_id:
+                await callback_query.answer("⛔ فقط سازنده می‌تواند لغو کند!", show_alert=True)
+                return
+            if not game.get("refunded"):
+                db.set("credits", user_id, db.get("credits", user_id, 0) + game["amount"])
+                game["refunded"] = True
+                _cancel_daily_bet(user_id, game["amount"])
+            game["finished"] = True
+            db.set("doz_games", key, game)
+            await edit_bet_message(client, int(chat_s), int(msg_s),
+                                   f"⛔ بازی دوز توسط سازنده لغو شد.\n💸 مبلغ به سازنده برگشت داده شد.")
+            await callback_query.answer("✅ لغو و برگشت داده شد.")
+        except Exception as e:
+            await callback_query.answer(f"⚠️ خطا: {str(e)[:80]}", show_alert=True)
+        return
+
+    if data.startswith("dozmove_"):
+        try:
+            parts = data.split("_")   # dozmove, chat, msg, cell
+            chat_s, msg_s, cell_s = parts[1], parts[2], parts[3]
+            key = f"{chat_s}_{msg_s}"
+            game = db.get("doz_games", key)
+            if not game:
+                await callback_query.answer("⛔ بازی یافت نشد.", show_alert=True)
+                return
+            if game.get("finished"):
+                await callback_query.answer("⛔ بازی تمام شده است.", show_alert=True)
+                return
+            uid = callback_query.from_user.id
+            if game.get("x_id") == uid:
+                my_mark = "X"
+            elif game.get("o_id") == uid:
+                my_mark = "O"
+            else:
+                await callback_query.answer("👥 این بازی بین دو نفر دیگر است!", show_alert=True)
+                return
+            if my_mark != game.get("turn"):
+                await callback_query.answer("⏳ الان نوبت تو نیست!", show_alert=True)
+                return
+            i = int(cell_s)
+            board = game["board"]
+            if board[i] != "E":
+                await callback_query.answer("❌ این خانه پر است!", show_alert=True)
+                return
+
+            board[i] = my_mark
+            game["board"] = board
+            res = _doz_check(board)
+            if res:
+                await callback_query.answer("🏁")
+                await _doz_finish(client, key, game, res)
+            else:
+                game["turn"] = "O" if my_mark == "X" else "X"
+                db.set("doz_games", key, game)
+                await edit_bet_message(client, int(chat_s), int(msg_s), _doz_game_text(game), _doz_board_keyboard(key))
+                await callback_query.answer()
         except Exception as e:
             await callback_query.answer(f"⚠️ خطا: {str(e)[:80]}", show_alert=True)
         return
@@ -1613,6 +1975,8 @@ async def callback_handler(client, callback_query):
             "💎 هر ۱ الماس = ۱ ساعت سلف فعال\n"
             "🎰 گردونه شانس: روزی یک بار الماس رایگان!\n"
             "🎲 شرطبندی گروهی: در گروه بنویسید `شرطبندی 100`\n"
+            "🎮 بازی دوز: در گروه بنویسید `دوز 100` ( Tic-Tac-Toe )\n"
+            "🏆 لیدربورد روزانه شرطبندی: ریست هر ۲۴ ساعت\n"
             "🎁 زیرمجموعه: +۳ الماس برای هر دعوت"
         )
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]])
@@ -1694,7 +2058,7 @@ async def callback_handler(client, callback_query):
         await callback_query.answer()
         return
 
-    # ---------- ⚡ فعالسازی سلف: متن راهنما + دکمه اشتراک‌گذاری شماره ----------
+    # ---------- ⚡ فعالسازی سلف ----------
     if data in ("activate_self", "start_login"):
         ok, chans = await check_force_join(client, user_id)
         if not ok:
@@ -1714,7 +2078,6 @@ async def callback_handler(client, callback_query):
         except:
             pass
 
-        # 📱 کیبورد با دکمه اشتراک‌گذاری شماره تلگرام (Warning + اشتراک‌گذاری)
         await client.send_message(
             user_id,
             f"👇 روی دکمه پایین بزنید و «اشتراک‌گذاری» را تایید کنید\n"
