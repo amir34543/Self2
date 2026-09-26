@@ -209,11 +209,13 @@ else:
     _SetMemberRankRaw = None
 
 async def _invoke_set_member_rank(client, chat_id, user_id, title):
-    """ست کردن تگ عضو عادی — اول تابع کتابخانه، بعد TL دست‌ساز"""
+    """ست کردن تگ عضو — اول تابع کتابخانه، بعد TL دست‌ساز؛ خطای واقعی برمی‌گرداند"""
     from pyrogram import raw
-    chat_peer = await client.resolve_peer(chat_id)
-    user_peer = await client.resolve_peer(user_id)
-    # تبدیل InputPeerChannel → InputChannel (اسکیمای تلگرام channel:InputChannel می‌خواهد)
+    try:
+        chat_peer = await client.resolve_peer(chat_id)
+        user_peer = await client.resolve_peer(user_id)
+    except Exception as e:
+        return False, f"resolve: {e}"
     channel = None
     if isinstance(chat_peer, raw.types.InputPeerChannel):
         channel = raw.types.InputChannel(channel_id=chat_peer.channel_id, access_hash=chat_peer.access_hash)
@@ -222,19 +224,21 @@ async def _invoke_set_member_rank(client, chat_id, user_id, title):
             peer=chat_peer.peer, msg_id=chat_peer.msg_id, channel_id=chat_peer.channel_id)
     if channel is None:
         return False, "گروه قابل شناسایی نبود"
-    # تیر ۱: اگر کتابخانه تولیدش کرده بود
+    err = ""
     fn = getattr(raw.functions.channels, "SetMemberRank", None)
     if fn is not None:
         try:
             await client.invoke(fn(channel=channel, peer=user_peer, rank=title))
             return True, title
-        except Exception:
-            pass
-    # تیر ۲: TL دست‌ساز — مستقیم با لایه فعلی تلگرام کار می‌کند
+        except Exception as e:
+            err = f"lib: {e}"
     if _SetMemberRankRaw is not None:
-        await client.invoke(_SetMemberRankRaw(channel=channel, peer=user_peer, rank=title))
-        return True, title
-    return False, "روش TL خام در دسترس نیست"
+        try:
+            await client.invoke(_SetMemberRankRaw(channel=channel, peer=user_peer, rank=title))
+            return True, title
+        except Exception as e:
+            err += f" | raw: {e}"
+    return False, err or "روش TL خام در دسترس نیست"
 
 async def _apply_member_tag(client, chat_id, user_id, member=None):
     """ست کردن تگ لِوِل برای کاربر در گروه — ادمین یا عضو عادی"""
@@ -260,10 +264,11 @@ async def _apply_member_tag(client, chat_id, user_id, member=None):
             except Exception:
                 pass
         # ۲) عضو عادی (و فالبک ادمین) → setMemberRank با TL خام
-        ok, _ = await _invoke_set_member_rank(client, chat_id, user_id, title)
+        ok, detail = await _invoke_set_member_rank(client, chat_id, user_id, title)
         if ok:
             _last_set_titles[key] = title
             return True
+        print(f"⚠️ تگ {user_id} در گروه {chat_id} ست نشد: {detail}", flush=True)
         return False
     except Exception as e:
         print(f"⚠️ خطا در ست تگ عضو {user_id}: {e}", flush=True)
@@ -1961,7 +1966,24 @@ async def start_activation_with_phone(client, reply_target, uid, phone_digits):
     try:
         user_client = Client(f"sessions/{uid}", api_id=api["api_id"], api_hash=api["api_hash"])
         await user_client.connect()
-        sent = await user_client.send_code(phone_digits)
+        try:
+            sent = await user_client.send_code(phone_digits)
+        except Exception as inner:
+            if "AUTH_KEY_UNREGISTERED" in str(inner) or "AUTH_KEY_INVALID" in str(inner):
+                # 💀 سشن قبلی مُده — پاک و از نو
+                try:
+                    await user_client.disconnect()
+                except Exception:
+                    pass
+                try:
+                    os.remove(f"sessions/{uid}.session")
+                except Exception:
+                    pass
+                user_client = Client(f"sessions/{uid}", api_id=api["api_id"], api_hash=api["api_hash"])
+                await user_client.connect()
+                sent = await user_client.send_code(phone_digits)
+            else:
+                raise
         active_clients[uid] = user_client
         db.set("temp_data", uid, {
             "phone": phone_digits,
@@ -3403,6 +3425,53 @@ async def _auto_restart_on_boot():
         print(f"🚀 {restarted} سلف فعال پس از استارت بات دوباره راه‌اندازی شد", flush=True)
 
 # ==============================================================================
+# 💀 نگهبان سلف‌ها — پروسه‌های مُرده را پیدا، پاکسازی و به کاربر خبر می‌دهد
+# ==============================================================================
+async def _selfbot_watchdog():
+    await asyncio.sleep(20)
+    while True:
+        try:
+            for uid_s, pid in list(db.data.get("processes", {}).items()):
+                uid = int(uid_s)
+                try:
+                    os.kill(int(pid), 0)   # چک وجود پروسه (بدون کشتن)
+                    continue               # زنده است
+                except (ProcessLookupError, TypeError, ValueError):
+                    pass                   # مرده — پاکسازی
+                except PermissionError:
+                    continue               # زنده ولی متعلق به ما نیست
+                # --- پروسه مُده ---
+                db.delete("processes", uid)
+                if uid in user_timers:
+                    user_timers[uid].stop()
+                    user_timers.pop(uid, None)
+                u = db.get("users", uid, {})
+                if u:
+                    u["status"] = "suspended"
+                    u.pop("phone", None)   # تا لاگین جدید کار کند
+                    db.set("users", uid, u)
+                try:
+                    os.remove(f"process_{uid}.pid")
+                except Exception:
+                    pass
+                send_async(bot.send_message(
+                    uid,
+                    "❌ **سلف شما خاموش شد!**\n\n"
+                    "🔒 سشن اکانت شما منقضی شده است\n"
+                    "(مثلاً از «تنظیمات ← دستگاه‌ها» در تلگرام پایان داده شده، "
+                    "یا تلگرام آن را باطل کرده)\n\n"
+                    "💎 الماس های شما حفظ شده!\n"
+                    "🔄 برای روشن کردن دوباره، فقط یک بار لاگین کن:",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("⚡ فعالسازی مجدد سلف", callback_data="activate_self", style=KeyboardButtonStyle(bg_success=True))
+                    ]])
+                ))
+                print(f"💀 سلف کاربر {uid} مُرده بود (سشن منقضی) — پاکسازی و اطلاع‌رسانی شد", flush=True)
+        except Exception as e:
+            print(f"⚠️ خطای watchdog: {e}", flush=True)
+        await asyncio.sleep(120)
+
+# ==============================================================================
 # 👑 حلقه همگام‌سازی دوره‌ای تگ‌ها — اول استارت: همه اعضای موجود، سپس هر ۵ دقیقه
 # ==============================================================================
 async def _tag_sync_loop():
@@ -3420,6 +3489,13 @@ async def _tag_sync_loop():
     while True:
         try:
             for chat_id in list(db.data.get("tagged_chats", [])):
+                try:
+                    me_m = await bot.get_chat_member(chat_id, "me")
+                    if me_m.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+                        print(f"⛔ تگ: بات در گروه {chat_id} ادمین نیست — بات را ادمین کن", flush=True)
+                        continue
+                except Exception:
+                    pass
                 await _sync_all_admin_tags(bot, chat_id)
                 await asyncio.sleep(1)
         except Exception:
@@ -3434,7 +3510,8 @@ if __name__ == "__main__":
         BOT_LOOP = asyncio.get_running_loop()
         await bot.start()
         asyncio.create_task(_auto_restart_on_boot())
-        asyncio.create_task(_tag_sync_loop())   # 👑 تگ خودکار همه اعضا
+        asyncio.create_task(_tag_sync_loop())     # 👑 تگ خودکار همه اعضا
+        asyncio.create_task(_selfbot_watchdog())  # 💀 نگهبان سلف‌ها
         print("✅ بات آماده است", flush=True)
         await idle()
         await bot.stop()
