@@ -115,6 +115,15 @@ auto_delete_seconds = 0
 banner_active = None
 banner_interval_min = 5
 last_banner = 0
+
+# ---- 📢 تبچی: نسخه پیشرفته بنر همگانی — چرخش چند بنر، تعداد دور مشخص، آمار ----
+TABCHI_FILE = f"tabchi_{USER_ID}.json" if USER_ID else "tabchi.json"
+tabchi = jload(TABCHI_FILE, {
+    "active": False, "codes": [], "idx": 0, "interval": 300, "max_rounds": None,
+    "rounds_done": 0, "last_run": 0.0,
+    "sent_total": 0, "failed_total": 0, "last_sent": 0, "last_failed": 0, "last_ts": 0.0,
+})
+def tabchi_save(): jsave(TABCHI_FILE, tabchi)
 START_TIME = time.time()
 
 # ساعت در اسم: وضعیت باید روی دیسک ذخیره شود وگرنه بعد از هر ری‌استارت
@@ -299,7 +308,7 @@ CMD_STARTERS = ("بایو", "یوزر", "نام", "ترجمه", "آب", "بار�
                 "افزودن", "سکوت", "رفع", "مخاطب", "شماره", "تاس", "ریسه", "جک", "شانس", "قلم", "ویوئر",
                 "فضول", "سلامت", "ویرایش", "تنظیم", "لیست", "فرمت", "انتی", "آنلاین", "شنود", "تایم",
                 "پاکسازی", "منوی", "بنر", "زمان", "وضعیت", "ریست", "قفل", "بازکردن", "پروفایل", "عکس",
-                "پنل", "panel", "منش", "امضا", "جمنای", "هوش", "آهنگ", "موزیک", "اسم", "شزم", "اصلاح", "خلاصه", "متن", "تبدیل")
+                "پنل", "panel", "منش", "امضا", "جمنای", "هوش", "آهنگ", "موزیک", "اسم", "شزم", "اصلاح", "خلاصه", "متن", "تبدیل", "تبچی")
 
 # ==============================================================================
 # ★ هندلر پنل (اول از همه تا با بقیه تداخل نکند) ★
@@ -872,6 +881,91 @@ async def banner_cmds(client, message):
         banner_active = code
         last_banner = 0
         await message.edit(f"📢 بنر همگانی {code} روشن شد (هر {banner_interval_min} دقیقه)")
+
+def _fmt_secs(sec):
+    sec = int(max(0, sec))
+    if sec < 60: return f"{sec} ثانیه"
+    m, s = divmod(sec, 60)
+    return f"{m} دقیقه" + (f" و {s} ثانیه" if s else "")
+
+def _tabchi_status_text():
+    if not tabchi["codes"]:
+        return "🛑 **تبچی خاموش است**\n\nابتدا کد بنر(ها) را انتخاب کن: `تبچی کد 1` یا `تبچی کد 1,2,3`"
+    codes_txt = "، ".join(tabchi["codes"])
+    rounds_txt = "نامحدود" if tabchi["max_rounds"] is None else f"{tabchi['rounds_done']}/{tabchi['max_rounds']}"
+    lines = [
+        f"{'🟢' if tabchi['active'] else '🔴'} **وضعیت تبچی:** {'روشن' if tabchi['active'] else 'خاموش'}",
+        f"📋 کدهای در چرخش: {codes_txt}",
+        f"⏱ فاصله هر دور: {_fmt_secs(tabchi['interval'])}",
+        f"🔁 دور: {rounds_txt}",
+    ]
+    if tabchi["active"]:
+        remain = tabchi["interval"] - (time.time() - tabchi["last_run"])
+        lines.append(f"⏳ دور بعدی: {_fmt_secs(remain) if remain > 0 else 'در حال ارسال...'}")
+    if tabchi["last_ts"]:
+        ago = _fmt_secs(time.time() - tabchi["last_ts"])
+        lines.append(f"📨 آخرین دور: {tabchi['last_sent']} موفق، {tabchi['last_failed']} ناموفق ({ago} پیش)")
+    lines.append(f"📊 مجموع کل: {tabchi['sent_total']} موفق، {tabchi['failed_total']} ناموفق")
+    return "\n".join(lines)
+
+async def _tabchi_run_round(client):
+    """یک دور تبچی: بنر بعدی در چرخش را به همه گروه‌ها می‌فرستد"""
+    if not tabchi["codes"]: return
+    code = tabchi["codes"][tabchi["idx"] % len(tabchi["codes"])]
+    tabchi["idx"] += 1
+    text = banners.get(code)
+    if text is None: return
+    sent = failed = 0
+    async for d in app.get_dialogs(limit=300):
+        if d.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+            try:
+                await app.send_message(d.chat.id, text); sent += 1
+                await asyncio.sleep(4)
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+            except Exception:
+                failed += 1
+    tabchi["rounds_done"] += 1
+    tabchi["last_run"] = time.time(); tabchi["last_ts"] = tabchi["last_run"]
+    tabchi["last_sent"] = sent; tabchi["last_failed"] = failed
+    tabchi["sent_total"] += sent; tabchi["failed_total"] += failed
+    if tabchi["max_rounds"] is not None and tabchi["rounds_done"] >= tabchi["max_rounds"]:
+        tabchi["active"] = False
+    tabchi_save()
+
+@app.on_message(filters.me & filters.regex(
+    r"^(تبچی|تبچی وضعیت|تبچی شروع|تبچی توقف|تبچی کد [\d,\s]+|تبچی تکرار \d+ (\d+|نامحدود|بی نهایت))$"))
+async def tabchi_cmd(client, message):
+    t = message.text.strip()
+    if t in ("تبچی", "تبچی وضعیت"):
+        return await message.edit(_tabchi_status_text())
+    if t.startswith("تبچی کد"):
+        codes = [c.strip() for c in re.split(r"[,،\s]+", t[len("تبچی کد"):].strip()) if c.strip()]
+        bad = [c for c in codes if c not in banners]
+        if bad: return await message.edit(f"❌ کد نامعتبر: {', '.join(bad)}\nبا `لیست بنرها` کدهای موجود را ببین")
+        tabchi["codes"] = codes; tabchi["idx"] = 0; tabchi_save()
+        return await message.edit(f"✅ {len(codes)} بنر برای چرخش تبچی ثبت شد: {', '.join(codes)}")
+    if t == "تبچی شروع":
+        if not tabchi["codes"]:
+            return await message.edit("❌ اول کد بنر را انتخاب کن: `تبچی کد 1`")
+        m = await message.edit("📤 در حال ارسال دور تبچی...")
+        await _tabchi_run_round(client)
+        return await m.edit(f"✅ دور تبچی ارسال شد\n📨 {tabchi['last_sent']} موفق، {tabchi['last_failed']} ناموفق")
+    if t == "تبچی توقف":
+        tabchi["active"] = False; tabchi_save()
+        return await message.edit("🛑 تبچی چرخه‌ای متوقف شد")
+    if t.startswith("تبچی تکرار"):
+        if not tabchi["codes"]:
+            return await message.edit("❌ اول کد بنر را انتخاب کن: `تبچی کد 1`")
+        parts = t.split()
+        sec = int(parts[2])
+        cnt_raw = parts[3]
+        max_rounds = None if cnt_raw in ("نامحدود", "بی") or "نامحدود" in t else int(cnt_raw)
+        tabchi.update(active=True, interval=max(20, sec), max_rounds=max_rounds,
+                      rounds_done=0, last_run=0.0)
+        tabchi_save()
+        rounds_txt = "نامحدود" if max_rounds is None else str(max_rounds)
+        await message.edit(f"📢 تبچی چرخه‌ای روشن شد — هر {_fmt_secs(tabchi['interval'])}، {rounds_txt} دور")
 
 # ================== 🧹 تمیز ==================
 @app.on_message(filters.me & filters.regex(r"^پاکسازی$"))
@@ -3670,6 +3764,15 @@ async def banner_loop():
                     except Exception: pass
         await asyncio.sleep(20)
 
+async def tabchi_loop():
+    while True:
+        try:
+            if tabchi["active"] and tabchi["codes"] and (time.time() - tabchi["last_run"]) >= tabchi["interval"]:
+                await _tabchi_run_round(app)
+        except Exception as e:
+            print("⚠️ تبچی ناموفق بود:", repr(e))
+        await asyncio.sleep(5)
+
 if __name__ == "__main__":
     print("🧩 Persian Gulf Self | build panel-timed-r10 |", os.path.abspath(__file__))
     if USER_ID: print(f"✅ Persian Gulf Self برای کاربر {USER_ID} در حال اجرا... (نسخه شاهکار v7.0)")
@@ -3684,7 +3787,7 @@ if __name__ == "__main__":
     try:
         loop.run_until_complete(asyncio.gather(
             panel_state_loop(), panel_actions_loop(),
-            online_loop(), time_loop(), banner_loop()))
+            online_loop(), time_loop(), banner_loop(), tabchi_loop()))
     except KeyboardInterrupt:
         pass
     finally:
