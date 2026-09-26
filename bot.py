@@ -177,6 +177,44 @@ def _admin_title_for(user_id):
 _last_set_titles = {}  # (chat_id, user_id) -> title — جلوگیری از اسپم API
 
 # ==============================================================================
+# 🧑‍💻 تگر اکانتی — setMemberRank فقط با اکانت واقعی مجاز است (نه بات)
+# از سشن اکانت ادمین (خودت) استفاده می‌شود
+# ==============================================================================
+_tagger_client = None
+
+async def _get_tagger_client():
+    global _tagger_client
+    if _tagger_client is not None:
+        try:
+            if _tagger_client.is_connected:
+                return _tagger_client
+        except Exception:
+            pass
+        _tagger_client = None
+    src = f"sessions/{ADMIN_ID}.session"
+    if not os.path.exists(src):
+        print(f"⛔ تگر: سشن اکانت ادمین پیدا نشد ({src})", flush=True)
+        return None
+    # کپی سشن تا با پروسه self.py تداخل قفل SQLite رخ ندهد
+    try:
+        shutil.copyfile(src, "sessions/_tagger.session")
+    except Exception as e:
+        print(f"⛔ تگر: کپی سشن ناموفق: {e}", flush=True)
+        return None
+    try:
+        udata = db.get("users", ADMIN_ID, {}) or {}
+        api_id = udata.get("api_id", API_CREDENTIALS[0]["api_id"])
+        api_hash = udata.get("api_hash", API_CREDENTIALS[0]["api_hash"])
+        c = Client("sessions/_tagger", api_id=api_id, api_hash=api_hash)
+        await c.connect()
+        _tagger_client = c
+        print("✅ تگر آماده شد (اکانت ادمین برای ست تگ)", flush=True)
+        return _tagger_client
+    except Exception as e:
+        print(f"⛔ تگر: اتصال ناموفق: {e}", flush=True)
+        return None
+
+# ==============================================================================
 # 👑 channels.setMemberRank — فراخوانی دست‌ساز با TL خام
 # (برای نسخه‌هایی از PyrogramMod که این تابع را تولید نکرده‌اند)
 # ==============================================================================
@@ -209,11 +247,14 @@ else:
     _SetMemberRankRaw = None
 
 async def _invoke_set_member_rank(client, chat_id, user_id, title):
-    """ست کردن تگ عضو — اول تابع کتابخانه، بعد TL دست‌ساز؛ خطای واقعی برمی‌گرداند"""
+    """setMemberRank فقط با اکانت واقعی مجاز است (بات ممنوع) → از تگر استفاده می‌کنیم"""
+    tagger = await _get_tagger_client()
+    if tagger is None:
+        return False, "تگر در دسترس نیست (سشن اکانت ادمین یافت نشد — سلف خودت را یک بار روشن کن)"
     from pyrogram import raw
     try:
-        chat_peer = await client.resolve_peer(chat_id)
-        user_peer = await client.resolve_peer(user_id)
+        chat_peer = await tagger.resolve_peer(chat_id)
+        user_peer = await tagger.resolve_peer(user_id)
     except Exception as e:
         return False, f"resolve: {e}"
     channel = None
@@ -223,22 +264,24 @@ async def _invoke_set_member_rank(client, chat_id, user_id, title):
         channel = raw.types.InputChannelFromMessage(
             peer=chat_peer.peer, msg_id=chat_peer.msg_id, channel_id=chat_peer.channel_id)
     if channel is None:
-        return False, "گروه قابل شناسایی نبود"
+        return False, "گروه قابل شناسایی نبود (باید سوپرگروه باشد)"
     err = ""
     fn = getattr(raw.functions.channels, "SetMemberRank", None)
     if fn is not None:
         try:
-            await client.invoke(fn(channel=channel, peer=user_peer, rank=title))
+            await tagger.invoke(fn(channel=channel, peer=user_peer, rank=title))
             return True, title
         except Exception as e:
             err = f"lib: {e}"
+    else:
+        err = "lib: تابع تولید نشده"
     if _SetMemberRankRaw is not None:
         try:
-            await client.invoke(_SetMemberRankRaw(channel=channel, peer=user_peer, rank=title))
+            await tagger.invoke(_SetMemberRankRaw(channel=channel, peer=user_peer, rank=title))
             return True, title
         except Exception as e:
             err += f" | raw: {e}"
-    return False, err or "روش TL خام در دسترس نیست"
+    return False, err
 
 async def _apply_member_tag(client, chat_id, user_id, member=None):
     """ست کردن تگ لِوِل برای کاربر در گروه — ادمین یا عضو عادی"""
@@ -254,11 +297,12 @@ async def _apply_member_tag(client, chat_id, user_id, member=None):
         key = (chat_id, user_id)
         if _last_set_titles.get(key) == title:
             return True
-        # ۱) ادمین → روش استاندارد
+        # ۱) ادمین → روش استاندارد (با اکانت تگر)
         if member.status == enums.ChatMemberStatus.ADMINISTRATOR:
             try:
-                if hasattr(client, "set_administrator_title"):
-                    await client.set_administrator_title(chat_id, user_id, title)
+                tagger = await _get_tagger_client()
+                if tagger is not None and hasattr(tagger, "set_administrator_title"):
+                    await tagger.set_administrator_title(chat_id, user_id, title)
                     _last_set_titles[key] = title
                     return True
             except Exception:
@@ -280,20 +324,13 @@ async def _try_set_admin_title(client, chat_id, user_id):
         member = await client.get_chat_member(chat_id, user_id)
         if member.status == enums.ChatMemberStatus.OWNER:
             return False, "سازنده گروه هستی — تلگرام اجازه تغییر تگ سازنده را نمیدهد"
-        if member.status == enums.ChatMemberStatus.ADMINISTRATOR:
-            try:
-                me_member = await client.get_chat_member(chat_id, "me")
-                if me_member.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
-                    return False, "بات در این گروه ادمین نیست — من را ادمین کن"
-            except Exception:
-                return False, "بات در این گروه ادمین نیست — من را ادمین کن"
-        # ادمین یا عضو عادی → هر دو با setMemberRank (TL خام)
+        # ادمین یا عضو عادی → هر دو با setMemberRank (از طریق اکانت تگر)
         title = _admin_title_for(user_id)
         ok, res = await _invoke_set_member_rank(client, chat_id, user_id, title)
         if ok:
             _last_set_titles[(chat_id, user_id)] = title
             return True, res
-        return False, "سرور تلگرام تگ را نپذیرفت (بات باید ادمین گروه باشد)"
+        return False, res if res else "تلگرام تگ را نپذیرفت"
     except Exception as e:
         return False, str(e)[:100]
 
@@ -326,8 +363,7 @@ async def _get_tag_group_ids(client):
 async def _sync_all_admin_tags(client, chat_id):
     """تگ همه ادمین‌های گروه را با لولشان هماهنگ می‌کند (تعداد موفق برمی‌گرداند)"""
     try:
-        me_member = await client.get_chat_member(chat_id, "me")
-        if me_member.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+        if await _get_tagger_client() is None:
             return 0
         count = 0
         async for m in client.get_chat_members(chat_id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
@@ -344,8 +380,7 @@ async def _sync_all_admin_tags(client, chat_id):
 async def _full_member_tag_sync(client, chat_id):
     """تگ لِوِل را برای «همه اعضای فعلی» گروه ست می‌کند (تعداد موفق برمی‌گرداند)"""
     try:
-        me_member = await client.get_chat_member(chat_id, "me")
-        if me_member.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+        if await _get_tagger_client() is None:
             return 0
         count = 0
         async for m in client.get_chat_members(chat_id, limit=10000):
@@ -1652,8 +1687,8 @@ async def member_added_xp(client, message: Message):
                 else:
                     try:
                         await message.reply_text(
-                            "ℹ️ برای ست خودکار تگ لِوِل، من را **ادمین** کنید —\n"
-                            "به‌محض ادمین شدن، تگ همه اعضا خودکار ست می‌شود! 👑"
+                            "ℹ️ برای ست خودکار تگ لِوِل، سشن اکانت ادمین لازم است —\n"
+                            "سلف خودت را یک بار فعال کن تا تگر آماده شود! 👑"
                         )
                     except:
                         pass
@@ -2111,6 +2146,39 @@ async def private_photo_handler(client, message: Message):
 @bot.on_message(filters.command("ping") & filters.private)
 async def ping_cmd(client, message):
     await message.reply_text(f"🏓 پونگ! بات زنده است ⏰ {time.strftime('%H:%M:%S')}")
+
+# ==============================================================================
+# 🔧 تشخیص تگ — فقط ادمین
+# ==============================================================================
+@bot.on_message(filters.command("tagdebug") & filters.user(ADMIN_ID))
+async def tag_debug_cmd(client, message: Message):
+    lines = ["🔧 **تشخیص تگ**", ""]
+    chat_id = message.chat.id if message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP) else None
+    if chat_id is None:
+        ids = await _get_tag_group_ids(client)
+        if not ids:
+            await message.reply_text("❌ هیچ گروه تگی resolve نشد — بات عضو @GapPersianSelf هست؟")
+            return
+        chat_id = ids[0]
+    try:
+        chat = await client.get_chat(chat_id)
+        lines.append(f"🏷 گروه: {chat.title} (`{chat.id}`) — {chat.type}")
+    except Exception as e:
+        await message.reply_text(f"❌ get_chat ناموفق: {e}")
+        return
+    try:
+        me_m = await client.get_chat_member(chat_id, "me")
+        lines.append(f"🤖 وضعیت بات: {me_m.status}")
+    except Exception as e:
+        lines.append(f"🤖 خطای وضعیت بات: {e}")
+    tagger = await _get_tagger_client()
+    lines.append(f"🧑‍💻 تگر (اکانت ادمین): {'✅ وصل' if tagger else '❌ وصل نشد'}")
+    await message.reply_text("\n".join(lines))
+    ok, res = await _try_set_admin_title(client, chat_id, ADMIN_ID)
+    if ok:
+        await message.reply_text(f"✅ تست تگ روی خودت موفق بود: **{res}**")
+    else:
+        await message.reply_text(f"❌ تست تگ ناموفق:\n`{res}`")
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
@@ -3475,7 +3543,7 @@ async def _selfbot_watchdog():
 # 👑 حلقه همگام‌سازی دوره‌ای تگ‌ها — اول استارت: همه اعضای موجود، سپس هر ۵ دقیقه
 # ==============================================================================
 async def _tag_sync_loop():
-    """۱) اول استارت: تگ «همه اعضای موجود» گروه عضویت اجباری
+    """۱) اول استارت: تگ «همه اعضای موجود» گروه عضویت اجباری (با اکانت تگر)
     ۲) سپس هر ۵ دقیقه: همگام‌سازی ادمین‌ها + اعضای تازه‌وارد"""
     await asyncio.sleep(30)
     try:
@@ -3484,18 +3552,13 @@ async def _tag_sync_loop():
             n = await _full_member_tag_sync(bot, gid)
             if n:
                 print(f"👑 تگ لِوِل برای {n} عضو گروه ست شد", flush=True)
+            else:
+                print(f"ℹ️ تگ‌گذاری گروه {gid} نتیجه‌ای نداشت — با /tagdebug بررسی کن", flush=True)
     except Exception:
         pass
     while True:
         try:
             for chat_id in list(db.data.get("tagged_chats", [])):
-                try:
-                    me_m = await bot.get_chat_member(chat_id, "me")
-                    if me_m.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
-                        print(f"⛔ تگ: بات در گروه {chat_id} ادمین نیست — بات را ادمین کن", flush=True)
-                        continue
-                except Exception:
-                    pass
                 await _sync_all_admin_tags(bot, chat_id)
                 await asyncio.sleep(1)
         except Exception:
