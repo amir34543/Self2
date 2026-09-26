@@ -176,6 +176,66 @@ def _admin_title_for(user_id):
 
 _last_set_titles = {}  # (chat_id, user_id) -> title — جلوگیری از اسپم API
 
+# ==============================================================================
+# 👑 channels.setMemberRank — فراخوانی دست‌ساز با TL خام
+# (برای نسخه‌هایی از PyrogramMod که این تابع را تولید نکرده‌اند)
+# ==============================================================================
+try:
+    from pyrogram.raw.core import TL as _TLBase
+    _HAS_TL_BASE = True
+except ImportError:
+    _HAS_TL_BASE = False
+
+if _HAS_TL_BASE:
+    class _SetMemberRankRaw(_TLBase):
+        """channels.setMemberRank#07dd18bb flags:# rank:string channel:InputChannel peer:InputPeer = Updates;"""
+        ID = 0x07DD18BB
+        QUALNAME = "functions.channels.SetMemberRank"
+
+        def __init__(self, channel, peer, rank):
+            self.flags = 0
+            self.rank = rank
+            self.channel = channel
+            self.peer = peer
+
+        def write(self, b):
+            from pyrogram.raw.core.primitives import Int, String
+            b.write(Int(self.ID, False))
+            b.write(Int(self.flags))
+            b.write(String(self.rank))
+            b.write(self.channel.write())
+            b.write(self.peer.write())
+else:
+    _SetMemberRankRaw = None
+
+async def _invoke_set_member_rank(client, chat_id, user_id, title):
+    """ست کردن تگ عضو عادی — اول تابع کتابخانه، بعد TL دست‌ساز"""
+    from pyrogram import raw
+    chat_peer = await client.resolve_peer(chat_id)
+    user_peer = await client.resolve_peer(user_id)
+    # تبدیل InputPeerChannel → InputChannel (اسکیمای تلگرام channel:InputChannel می‌خواهد)
+    channel = None
+    if isinstance(chat_peer, raw.types.InputPeerChannel):
+        channel = raw.types.InputChannel(channel_id=chat_peer.channel_id, access_hash=chat_peer.access_hash)
+    elif isinstance(chat_peer, raw.types.InputPeerChannelFromMessage):
+        channel = raw.types.InputChannelFromMessage(
+            peer=chat_peer.peer, msg_id=chat_peer.msg_id, channel_id=chat_peer.channel_id)
+    if channel is None:
+        return False, "گروه قابل شناسایی نبود"
+    # تیر ۱: اگر کتابخانه تولیدش کرده بود
+    fn = getattr(raw.functions.channels, "SetMemberRank", None)
+    if fn is not None:
+        try:
+            await client.invoke(fn(channel=channel, peer=user_peer, rank=title))
+            return True, title
+        except Exception:
+            pass
+    # تیر ۲: TL دست‌ساز — مستقیم با لایه فعلی تلگرام کار می‌کند
+    if _SetMemberRankRaw is not None:
+        await client.invoke(_SetMemberRankRaw(channel=channel, peer=user_peer, rank=title))
+        return True, title
+    return False, "روش TL خام در دسترس نیست"
+
 async def _apply_member_tag(client, chat_id, user_id, member=None):
     """ست کردن تگ لِوِل برای کاربر در گروه — ادمین یا عضو عادی"""
     try:
@@ -199,24 +259,18 @@ async def _apply_member_tag(client, chat_id, user_id, member=None):
                     return True
             except Exception:
                 pass
-        # ۲) عضو عادی → متد جدید تلگرام SetMemberRank (اگر پشتیبانی شود)
-        try:
-            from pyrogram import raw
-            raw_fn = getattr(raw.functions.channels, "SetMemberRank", None)
-            if raw_fn is not None:
-                chat_peer = await client.resolve_peer(chat_id)
-                user_peer = await client.resolve_peer(user_id)
-                await client.invoke(raw_fn(channel=chat_peer, peer=user_peer, rank=title))
-                _last_set_titles[key] = title
-                return True
-        except Exception:
-            pass
+        # ۲) عضو عادی (و فالبک ادمین) → setMemberRank با TL خام
+        ok, _ = await _invoke_set_member_rank(client, chat_id, user_id, title)
+        if ok:
+            _last_set_titles[key] = title
+            return True
         return False
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ خطا در ست تگ عضو {user_id}: {e}", flush=True)
         return False
 
 async def _try_set_admin_title(client, chat_id, user_id):
-    """تگ لِوِل — ادمین یا عضو عادی؛ نتیجه + دلیل (برای دستور «لول»)"""
+    """تگ لِوِل — ادمین یا عضو عادی؛ نتیجه + دلیل"""
     try:
         member = await client.get_chat_member(chat_id, user_id)
         if member.status == enums.ChatMemberStatus.OWNER:
@@ -228,26 +282,13 @@ async def _try_set_admin_title(client, chat_id, user_id):
                     return False, "بات در این گروه ادمین نیست — من را ادمین کن"
             except Exception:
                 return False, "بات در این گروه ادمین نیست — من را ادمین کن"
-            title = _admin_title_for(user_id)
-            if hasattr(client, "set_administrator_title"):
-                await client.set_administrator_title(chat_id, user_id, title)
-                _last_set_titles[(chat_id, user_id)] = title
-                return True, title
-            return False, "نسخه Pyrogram از set_administrator_title پشتیبانی نمیکند"
-        # عضو عادی → متد جدید تلگرام
-        try:
-            from pyrogram import raw
-            raw_fn = getattr(raw.functions.channels, "SetMemberRank", None)
-            if raw_fn is None:
-                return False, "این نسخه تلگرام اجازه تگ‌کردن اعضای عادی را نمیدهد (فقط ادمین‌ها)"
-            chat_peer = await client.resolve_peer(chat_id)
-            user_peer = await client.resolve_peer(user_id)
-            title = _admin_title_for(user_id)
-            await client.invoke(raw_fn(channel=chat_peer, peer=user_peer, rank=title))
+        # ادمین یا عضو عادی → هر دو با setMemberRank (TL خام)
+        title = _admin_title_for(user_id)
+        ok, res = await _invoke_set_member_rank(client, chat_id, user_id, title)
+        if ok:
             _last_set_titles[(chat_id, user_id)] = title
-            return True, title
-        except Exception as e:
-            return False, f"تگ عضو عادی پشتیبانی نشد: {str(e)[:60]}"
+            return True, res
+        return False, "سرور تلگرام تگ را نپذیرفت (بات باید ادمین گروه باشد)"
     except Exception as e:
         return False, str(e)[:100]
 
@@ -291,6 +332,26 @@ async def _sync_all_admin_tags(client, chat_id):
                 continue
             if await _apply_member_tag(client, chat_id, m.user.id, m):
                 count += 1
+        return count
+    except Exception:
+        return 0
+
+async def _full_member_tag_sync(client, chat_id):
+    """تگ لِوِل را برای «همه اعضای فعلی» گروه ست می‌کند (تعداد موفق برمی‌گرداند)"""
+    try:
+        me_member = await client.get_chat_member(chat_id, "me")
+        if me_member.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+            return 0
+        count = 0
+        async for m in client.get_chat_members(chat_id, limit=10000):
+            try:
+                if m.user.is_bot or m.status == enums.ChatMemberStatus.OWNER:
+                    continue
+                if await _apply_member_tag(client, chat_id, m.user.id, m):
+                    count += 1
+                await asyncio.sleep(0.4)   # جلوگیری از فلود تلگرام
+            except Exception:
+                continue
         return count
     except Exception:
         return 0
@@ -1575,19 +1636,19 @@ async def member_added_xp(client, message: Message):
         me = await client.get_me()
         for m in (message.new_chat_members or []):
             if m.id == me.id:
-                # 🤖 بات به گروه اضافه شد
+                # 🤖 بات به گروه اضافه شد → تگ همه اعضای موجود
                 _track_chat(message.chat.id)
-                n = await _sync_all_admin_tags(client, message.chat.id)
+                n = await _full_member_tag_sync(client, message.chat.id)
                 if n:
                     try:
-                        await message.reply_text(f"👑 تگ لِوِل برای {n} ادمین خودکار ست شد!")
+                        await message.reply_text(f"👑 تگ لِوِل برای {n} عضو گروه خودکار ست شد!")
                     except:
                         pass
                 else:
                     try:
                         await message.reply_text(
                             "ℹ️ برای ست خودکار تگ لِوِل، من را **ادمین** کنید —\n"
-                            "به‌محض ادمین شدن، تگ همه ادمین‌ها خودکار ست می‌شود! 👑"
+                            "به‌محض ادمین شدن، تگ همه اعضا خودکار ست می‌شود! 👑"
                         )
                     except:
                         pass
@@ -2069,7 +2130,7 @@ async def start_handler(client, message: Message):
                 pass
 
 # ==============================================================================
-# 🏅 پروفایل لول — دستور «لول» در گروه و پیوی
+# 🏅 پروفایل لول — دستور «لول» در گروه و پیوی (بدون نمایش ارور به کاربر)
 # ==============================================================================
 @bot.on_message(filters.regex(r'^(?:لول|لول من)$'))
 async def level_profile_handler(client, message: Message):
@@ -2077,9 +2138,9 @@ async def level_profile_handler(client, message: Message):
     profile = build_level_profile(uid, message.from_user.first_name)
     sent = await message.reply_text(profile)
 
-    # 👑 تگ — فقط در گروه
+    # 👑 تگ — فقط در گروه؛ شکست‌ها بی‌صدا (فقط در لاگ)
     if message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-        _track_chat(message.chat.id)   # گروه هم ثبت شود برای همگام‌سازی خودکار
+        _track_chat(message.chat.id)
         ok, result = await _try_set_admin_title(client, message.chat.id, uid)
         if ok:
             try:
@@ -2087,10 +2148,7 @@ async def level_profile_handler(client, message: Message):
             except:
                 pass
         else:
-            try:
-                await sent.reply_text(f"ℹ️ تگ ست نشد: {result}")
-            except:
-                pass
+            print(f"ℹ️ تگ {uid} ست نشد: {result}", flush=True)
 
 @bot.on_message(filters.private & filters.text)
 async def private_text_router(client, message: Message):
@@ -3345,22 +3403,24 @@ async def _auto_restart_on_boot():
         print(f"🚀 {restarted} سلف فعال پس از استارت بات دوباره راه‌اندازی شد", flush=True)
 
 # ==============================================================================
-# 👑 حلقه همگام‌سازی دوره‌ای تگ‌ها (هر ۵ دقیقه) — گروه عضویت اجباری + گروه‌های ثبت‌شده
+# 👑 حلقه همگام‌سازی دوره‌ای تگ‌ها — اول استارت: همه اعضای موجود، سپس هر ۵ دقیقه
 # ==============================================================================
 async def _tag_sync_loop():
-    """هر ۵ دقیقه تگ اعضای گروه‌های ثبت‌شده را هماهنگ می‌کند
-    (اگر کسی تازه ادمین شده یا لولش عوض شده، خودکار آپدیت می‌شود)"""
+    """۱) اول استارت: تگ «همه اعضای موجود» گروه عضویت اجباری
+    ۲) سپس هر ۵ دقیقه: همگام‌سازی ادمین‌ها + اعضای تازه‌وارد"""
     await asyncio.sleep(30)
-    # گروه عضویت اجباری همیشه در لیست تگ‌هاست
     try:
         for gid in await _get_tag_group_ids(bot):
             _track_chat(gid)
+            n = await _full_member_tag_sync(bot, gid)
+            if n:
+                print(f"👑 تگ لِوِل برای {n} عضو گروه ست شد", flush=True)
     except Exception:
         pass
     while True:
         try:
             for chat_id in list(db.data.get("tagged_chats", [])):
-                n = await _sync_all_admin_tags(bot, chat_id)
+                await _sync_all_admin_tags(bot, chat_id)
                 await asyncio.sleep(1)
         except Exception:
             pass
@@ -3374,7 +3434,7 @@ if __name__ == "__main__":
         BOT_LOOP = asyncio.get_running_loop()
         await bot.start()
         asyncio.create_task(_auto_restart_on_boot())
-        asyncio.create_task(_tag_sync_loop())   # 👑 همگام‌سازی خودکار تگ‌ها
+        asyncio.create_task(_tag_sync_loop())   # 👑 تگ خودکار همه اعضا
         print("✅ بات آماده است", flush=True)
         await idle()
         await bot.stop()
