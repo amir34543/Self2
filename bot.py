@@ -47,6 +47,7 @@ os.makedirs("sessions", exist_ok=True)
 
 FORCE_CHANNELS = [
     "SelfPersiangulf",
+    "GapPersianSelf"
 ]
 
 # ===== سیستم الماس 💎 =====
