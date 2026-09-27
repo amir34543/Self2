@@ -400,6 +400,7 @@ async def _invoke_set_member_rank(tagger, channel, peer, title):
             continue
         cls = _build_rank_class(cid)
         if cls is None:
+            print(f"❌ کلاس برای CID {cid} ساخته نشد", flush=True)
             break
         try:
             await tagger.invoke(cls(channel=channel, peer=peer, rank=title))
@@ -419,16 +420,14 @@ async def _invoke_set_member_rank(tagger, channel, peer, title):
             return False, f"سرور: {es}"
         except Exception as e:
             err = str(e)
+            print(f"❌ SetMemberRank CID {cid} شکست خورد: {repr(e)}", flush=True)
             if "SESSION_REVOKED" in err or "AUTH_KEY" in err:
                 global _tagger_client
                 _tagger_client = None
                 return False, f"سرور: {err}"
             continue
 
-        return False, "هیچ شناسه‌ای از سمت تلگرام پذیرفته نشد — فایل لاگ کامل را بفرست"
-
-    # خروجی تضمینی برای جلوگیری از None
-    return False, "تابع SetMemberRank بدون نتیجه تمام شد"
+    return False, "هیچ شناسه‌ای از سمت تلگرام پذیرفته نشد"
 
 
 async def _apply_member_tag(client, chat_id, user_id, member=None):
@@ -492,12 +491,7 @@ async def _apply_member_tag(client, chat_id, user_id, member=None):
         else:
             _last_tag_errors[(chat_id, user_id)] = "گروه سوپرگروه نیست"
             return False
-        result = await _invoke_set_member_rank(tagger, channel, peer, title)
-        # محافظ در برابر خروجی None از تابع تگ
-        if not isinstance(result, tuple) or len(result) != 2:
-            _last_tag_errors[(chat_id, user_id)] = "تابع SetMemberRank خروجی نامعتبر داد"
-            return False
-        ok, detail = result
+        ok, detail = await _invoke_set_member_rank(tagger, channel, peer, title)
         if ok:
             _last_set_titles[key] = title
             return True
