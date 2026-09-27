@@ -427,6 +427,9 @@ async def _invoke_set_member_rank(tagger, channel, peer, title):
 
         return False, "هیچ شناسه‌ای از سمت تلگرام پذیرفته نشد — فایل لاگ کامل را بفرست"
 
+    # خروجی تضمینی برای جلوگیری از None
+    return False, "تابع SetMemberRank بدون نتیجه تمام شد"
+
 
 async def _apply_member_tag(client, chat_id, user_id, member=None):
     """ست کردن تگ لِوِل — ادمین با editAdmin، عضو عادی با setMemberRank (هر دو از تگر)"""
@@ -489,7 +492,12 @@ async def _apply_member_tag(client, chat_id, user_id, member=None):
         else:
             _last_tag_errors[(chat_id, user_id)] = "گروه سوپرگروه نیست"
             return False
-        ok, detail = await _invoke_set_member_rank(tagger, channel, peer, title)
+        result = await _invoke_set_member_rank(tagger, channel, peer, title)
+        # محافظ در برابر خروجی None از تابع تگ
+        if not isinstance(result, tuple) or len(result) != 2:
+            _last_tag_errors[(chat_id, user_id)] = "تابع SetMemberRank خروجی نامعتبر داد"
+            return False
+        ok, detail = result
         if ok:
             _last_set_titles[key] = title
             return True
