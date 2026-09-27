@@ -296,29 +296,137 @@ if _TLBase is not None:
 else:
     _SetMemberRankRaw = None
 
+def _build_rank_class(cid):
+    """کلاس channels.SetMemberRank با ID دلخواه می‌سازد"""
+    if _TLBase is None:
+        return None
+    from io import BytesIO as _BytesIO
+    from pyrogram.raw.core.primitives import Int as _Int, String as _String
+
+    class _SetMemberRankRaw(_TLBase):
+        ID = cid
+        QUALNAME = "functions.channels.SetMemberRank"
+        __slots__ = ["flags", "rank", "channel", "peer"]
+
+        def __init__(self, channel, peer, rank=None):
+            try:
+                super().__init__()
+            except Exception:
+                pass
+            self.flags = 1 if rank else 0
+            self.rank = rank or ""
+            self.channel = channel
+            self.peer = peer
+
+        def write(self, b=None):
+            out = _BytesIO()
+            out.write(_Int(self.ID, False))
+            out.write(_Int(self.flags))
+            if self.rank:
+                out.write(_String(self.rank))
+            out.write(self.channel.write())
+            out.write(self.peer.write())
+            data = out.getvalue()
+            if b is not None:
+                b.write(data)
+                return None
+            return data
+
+        def to_dict(self, recursive=True):
+            return {"_": self.QUALNAME, "rank": self.rank}
+    return _SetMemberRankRaw
+
+def _candidate_rank_ids():
+    """کاندیدهای شناسه متد: حالدهای شناخته‌شده + محاسبه CRC32 زنده از رشته‌های اسکیما"""
+    import zlib
+    ids = [0x07DD18BB, 0xC01F29D3]
+    schema_strs = [
+        "channels.setMemberRank flags:# rank:flags.0?string channel:InputChannel peer:InputPeer = Updates",
+        "channels.setMemberRank rank:flags.0?string channel:InputChannel peer:InputPeer = Updates",
+        "channels.setMemberRank rank:string channel:InputChannel peer:InputPeer = Updates",
+        "channels.setMemberRank flags:# rank:string channel:InputChannel peer:InputPeer = Updates",
+        "channels.setMemberRank#07dd18bb flags:# rank:flags.0?string channel:InputChannel peer:InputPeer = Updates",
+    ]
+    for s in schema_strs:
+        try:
+            cid = zlib.crc32(s.encode("utf-8")) & 0xFFFFFFFF
+            if cid and cid not in ids:
+                ids.append(cid)
+        except Exception:
+            pass
+    return ids
+
+_resolved_rank_cid = None   # اگر پیدا شد کش می‌شود
+
+# بازیابی از دیتابیس (تا هر ری‌استارت دوباره probe نشود)
+try:
+    _saved_cid = db.get("tag_cid", "cid", None)
+    if _saved_cid:
+        _resolved_rank_cid = int(_saved_cid)
+except Exception:
+    pass
+
 async def _invoke_set_member_rank(tagger, channel, peer, title):
-    """ست تگ با اکانت تگر — اول تابع کتابخانه، بعد TL دست‌ساز؛ خطای واقعی برمی‌گرداند"""
+    """ست تگ با اکانت تگر — ID درست متد به‌صورت خودکار کشف و کش می‌شود"""
+    global _resolved_rank_cid
     from pyrogram import raw
-    err = ""
+    from pyrogram.errors import RPCError
+
+    # ۱) اگر کتابخانه تولیدش کرده بود
     fn = getattr(raw.functions.channels, "SetMemberRank", None)
     if fn is not None:
         try:
             await tagger.invoke(fn(channel=channel, peer=peer, rank=title))
             return True, title
         except Exception as e:
-            err = f"lib: {e}"
-    else:
-        err = "lib: SetMemberRank تولید نشده"
-    if _SetMemberRankRaw is not None:
+            print(f"ℹ️ SetMemberRank کتابخانه: {e}", flush=True)
+
+    # ۲) ID کش‌شده از تلاش قبلی
+    if _resolved_rank_cid is not None:
+        cls = _build_rank_class(_resolved_rank_cid)
+        if cls is not None:
+            try:
+                await tagger.invoke(cls(channel=channel, peer=peer, rank=title))
+                return True, title
+            except Exception as e:
+                es = str(e)
+                if "INPUT_METHOD_INVALID" not in es and "METHOD_INVALID" not in es and "CONSTRUCTOR_INVALID" not in es:
+                    return False, f"سرور: {es} (شناسه درست است — محدودیت تلگرام)"
+                _resolved_rank_cid = None   # کش غلط بود، دوباره کشف کن
+
+    # ۳) کاندیدها را یکی‌یکی امتحان کن
+    for cid in _candidate_rank_ids():
+        if cid == _resolved_rank_cid:
+            continue
+        cls = _build_rank_class(cid)
+        if cls is None:
+            break
         try:
-            await tagger.invoke(_SetMemberRankRaw(channel=channel, peer=peer, rank=title))
+            await tagger.invoke(cls(channel=channel, peer=peer, rank=title))
+            # ✅ پذیرفته شد — کش کن
+            _resolved_rank_cid = cid
+            db.set("tag_cid", "cid", cid)
+            print(f"✅ شناسه درست SetMemberRank کشف شد: 0x{cid:08X} — کش شد", flush=True)
             return True, title
+        except RPCError as e:
+            es = str(e)
+            if "INPUT_METHOD_INVALID" in es or "METHOD_INVALID" in es or "CONSTRUCTOR_INVALID" in es:
+                continue   # شناسه غلط — کاندید بعدی
+            # شناسه درست است ولی تلگرام محدودیت دیگری دارد
+            _resolved_rank_cid = cid
+            db.set("tag_cid", "cid", cid)
+            print(f"✅ شناسه درست SetMemberRank: 0x{cid:08X} | محدودیت: {es}", flush=True)
+            return False, f"سرور: {es}"
         except Exception as e:
-            err += f" | raw: {e}"
-    if "SESSION_REVOKED" in err or "AUTH_KEY_UNREGISTERED" in err or "AUTH_KEY_INVALID" in err:
-        global _tagger_client
-        _tagger_client = None   # تا تلاش بعدی سشن تازه کپی شود
-    return False, err
+            err = str(e)
+            if "SESSION_REVOKED" in err or "AUTH_KEY" in err:
+                global _tagger_client
+                _tagger_client = None
+                return False, f"سرور: {err}"
+            continue
+
+        return False, "هیچ شناسه‌ای از سمت تلگرام پذیرفته نشد — فایل لاگ کامل را بفرست"
+
 
 async def _apply_member_tag(client, chat_id, user_id, member=None):
     """ست کردن تگ لِوِل — ادمین با editAdmin، عضو عادی با setMemberRank (هر دو از تگر)"""
