@@ -57,12 +57,12 @@ TAG_GROUPS = FORCE_GROUPS
 _TAG_GROUP_IDS = []   # کش داخلی
 
 # ===== سیستم الماس 💎 =====
-DIAMOND_RATE = 1440
-PRICE_PER_MONTH = 50000
+DIAMOND_RATE = 1440                 # 1440 الماس = 1 ماه (50,000 تومان)
+PRICE_PER_MONTH = 50000             # تومان
 TOMAN_PER_DIAMOND = PRICE_PER_MONTH / DIAMOND_RATE
-ACTIVATION_COST = 2
-BET_TAX = 0.06
-LOW_DIAMOND_WARN = 5
+ACTIVATION_COST = 2                 # ⚡ هزینه پایه فعالسازی سلف (الماس) — با تخفیف لول کم می‌شود
+BET_TAX = 0.06                      # مالیات ۶٪ بازی‌ها
+LOW_DIAMOND_WARN = 5                # ⚠️ هشدار وقتی این تعداد الماس مونده
 card_info = {
     "card_number": "6037-1234-1234-1234",
     "card_owner": "نام صاحب کارت",
@@ -81,18 +81,22 @@ ACTIVATION_TEXT = """🚀 **فعالسازی**
 
 𝟓 ـ فعالسازی با ۲ الماس 💙"""
 
+# ===== 🎰 گردونه شانس =====
 WHEEL_COOLDOWN = 86400
 WHEEL_PRIZES = [5, 10, 15, 20, 25, 30, 50, 100]
 WHEEL_WEIGHTS = [30, 25, 20, 12, 7, 4, 1.5, 0.5]
 
+# ===== 🏆 لیدربورد روزانه =====
 LEADERBOARD_RESET = 86400
 LEADERBOARD_PRIZES_TEXT = "💎 جوایزِ امشب: نفر اول ۲۰۰۰ / دوم ۱۰۰۰ / سوم ۵۰۰ الماس"
 
+# ===== 🎮 دوز =====
 DOZ_EMPTY = "➖"
 DOZ_JOIN_TIMEOUT = 300
 DOZ_MOVE_TIMEOUT = 600
 DOZ_WIN_LINES = [(0, 1, 2), (3, 4, 5), (6, 7, 8), (0, 3, 6), (1, 4, 7), (2, 5, 8), (0, 4, 8), (2, 4, 6)]
 
+# ===== 🪨📄✂️ سنگ کاغذ قیچی =====
 RPS_JOIN_TIMEOUT = 300
 RPS_PICK_TIMEOUT = 180
 RPS_EMOJI = {"r": "🪨", "p": "📄", "s": "✂️"}
@@ -102,7 +106,8 @@ RPS_BEATS = {"r": "s", "p": "r", "s": "p"}
 CELEBRATIONS = ["🎉🎊✨🥳", "🎆🎇✨🌟", "🎊🎈🥳💫", "✨🏆🎉⭐"]
 
 # ==============================================================================
-# 🏅 سیستم لِوِل
+# 🏅 سیستم لِوِل — لقب‌ها، امتیاز لازم، جایزه ارتقا (یک‌بار) و تخفیف
+# ⚙️ همه اعداد از اینجا قابل تغییر است
 # ==============================================================================
 LEVELS = [
     {"level": 1,  "emoji": "🐣", "title": "تازه‌وارد",        "xp": 0,      "reward": 0,    "discount": 0},
@@ -117,17 +122,19 @@ LEVELS = [
     {"level": 10, "emoji": "🐲", "title": "اژدهای افسانه‌ای",  "xp": 300000, "reward": 4500, "discount": 50},
 ]
 
+# 💸 کارمزد انتقال وابسته به لول: (حداقل٪, حداکثر٪) — لول بالاتر = کارمزد کمتر
 LEVEL_FEE_RANGES = {
     1: (5, 15), 2: (4, 12), 3: (3, 10), 4: (3, 9), 5: (2, 8),
     6: (2, 7), 7: (1, 6), 8: (1, 5), 9: (0, 4), 10: (0, 2),
 }
 
-XP_PER_GAME = 50
-XP_PER_HOUR = 20
-XP_PER_PURCHASE = 100
-XP_PER_10_DIAMONDS = 1
-XP_PER_MEMBER = 100
-XP_PER_REFERRAL = 500
+# ⚡ امتیازدهی
+XP_PER_GAME = 50          # هر بازی (شرط/دوز/سنگ‌کاغذ‌قیچی)
+XP_PER_HOUR = 20          # هر ساعت فعال‌بودن سلف
+XP_PER_PURCHASE = 100     # هر خرید تاییدشده
+XP_PER_10_DIAMONDS = 1    # به‌ازای هر ۱۰ الماس خریداری‌شده
+XP_PER_MEMBER = 100       # هر ممبری که در گروه ادد کند
+XP_PER_REFERRAL = 500     # هر زیرمجموعه
 
 def _level_by_xp(xp):
     lvl = 1
@@ -165,28 +172,45 @@ def _admin_title_for(user_id):
             return c
     return f"لول {lvl}"
 
-_last_set_titles = {}  # (chat_id, user_id) -> title
+_last_set_titles = {}   # (chat_id, user_id) -> title
+_last_tag_errors = {}   # (chat_id, user_id) -> آخرین خطا
 
 # ==============================================================================
 # 🧑‍💻 تگر اکانتی — setMemberRank فقط با اکانت واقعی مجاز است (نه بات)
-# از سشن اکانت ادمین (خودت) استفاده می‌شود
+# از سشن اکانت ادمین (خودت) استفاده می‌شود — همان کاری که سلف‌بات‌های
+# حرفه‌ای (مثل نیترو سلف) انجام می‌دهند
 # ==============================================================================
 _tagger_client = None
+_tagger_mtime = 0.0
 
 async def _get_tagger_client():
-    global _tagger_client
+    """کلاینت تگر — اگر سشن اصلی عوض شود (لاگین مجدد) خودکار تازه می‌شود"""
+    global _tagger_client, _tagger_mtime
+    src = f"sessions/{ADMIN_ID}.session"
+    if not os.path.exists(src):
+        print("⛔ تگر: سشن اکانت ادمین پیدا نشد — سلف خودت را یک بار فعال کن", flush=True)
+        return None
+    try:
+        mt = os.path.getmtime(src)
+    except Exception:
+        mt = 0.0
+    # اگر سشن اصلی تازه شد (لاگین مجدد) → کلاینت قدیمی را دور بریز
     if _tagger_client is not None:
         try:
             if _tagger_client.is_connected:
-                return _tagger_client
+                if mt != _tagger_mtime:
+                    try:
+                        await _tagger_client.disconnect()
+                    except Exception:
+                        pass
+                    _tagger_client = None
+                else:
+                    return _tagger_client
+            else:
+                _tagger_client = None
         except Exception:
-            pass
-        _tagger_client = None
-    src = f"sessions/{ADMIN_ID}.session"
-    if not os.path.exists(src):
-        print(f"⛔ تگر: سشن اکانت ادمین پیدا نشد ({src}) — سلف خودت را یک بار فعال کن", flush=True)
-        return None
-    # کپی سشن (با ۳ بار تلاش تا قفل SQLite رفع شود)
+            _tagger_client = None
+    # کپی سشن (۳ بار تلاش تا قفل SQLite رفع شود)
     copied = False
     for attempt in range(3):
         try:
@@ -207,6 +231,7 @@ async def _get_tagger_client():
         c = Client("sessions/_tagger", api_id=api_id, api_hash=api_hash)
         await c.connect()
         _tagger_client = c
+        _tagger_mtime = mt
         print("✅ تگر آماده شد (اکانت ادمین برای ست تگ)", flush=True)
         return _tagger_client
     except Exception as e:
@@ -214,51 +239,99 @@ async def _get_tagger_client():
         return None
 
 # ==============================================================================
-# 👑 channels.setMemberRank — TL دست‌ساز (برای PyrogramModهایی که تولیدش نکرده‌اند)
+# 👑 channels.setMemberRank — TL دست‌ساز با TLRequest (پایه درست pyrogram 2.x)
+# اسکیما: channels.setMemberRank#07dd18bb flags:# rank:flags.0?string channel:InputChannel peer:InputPeer = Updates;
+# ترتیب serialization: ID → flags → rank(اگر flag.0) → channel → peer
 # ==============================================================================
+_TLBase = None
 try:
-    from pyrogram.raw.core import TL as _TLBase
-    _HAS_TL_BASE = True
+    from pyrogram.raw.core import TLRequest as _TLBase
 except ImportError:
-    _HAS_TL_BASE = False
+    try:
+        from pyrogram.raw.core.tl_request import TLRequest as _TLBase
+    except ImportError:
+        _TLBase = None
 
-if _HAS_TL_BASE:
+if _TLBase is not None:
+    from io import BytesIO as _BytesIO
+    from pyrogram.raw.core.primitives import Int as _Int, String as _String
+
     class _SetMemberRankRaw(_TLBase):
-        """channels.setMemberRank#07dd18bb flags:# rank:string channel:InputChannel peer:InputPeer = Updates;"""
         ID = 0x07DD18BB
         QUALNAME = "functions.channels.SetMemberRank"
+        __slots__ = ["flags", "rank", "channel", "peer"]
 
-        def __init__(self, channel, peer, rank):
-            self.flags = 0
-            self.rank = rank
+        def __init__(self, channel, peer, rank=None):
+            try:
+                super().__init__()
+            except Exception:
+                pass
+            self.flags = 1 if rank else 0
+            self.rank = rank or ""
             self.channel = channel
             self.peer = peer
 
-        def write(self, b):
-            from pyrogram.raw.core.primitives import Int, String
-            b.write(Int(self.ID, False))
-            b.write(Int(self.flags))
-            b.write(String(self.rank))
-            b.write(self.channel.write())
-            b.write(self.peer.write())
+        def write(self, b=None):
+            out = _BytesIO()
+            out.write(_Int(self.ID, False))
+            out.write(_Int(self.flags))
+            if self.rank:
+                out.write(_String(self.rank))
+            out.write(self.channel.write())
+            out.write(self.peer.write())
+            data = out.getvalue()
+            if b is not None:
+                b.write(data)
+                return None
+            return data
+
+        def to_dict(self, recursive=True):
+            return {"_": self.QUALNAME, "rank": self.rank}
 else:
     _SetMemberRankRaw = None
 
-# ==============================================================================
-# 👑 هسته تگ‌گذاری — با access_hash مستقیم اعضا (بدون PEER_ID_INVALID)
-# ==============================================================================
-async def _tag_member(tagger, chat_id, user_id, member=None):
-    """ست کردن تگ لِوِل با اکانت تگر — سازنده، ادمین و عضو عادی همگی امتحان می‌شوند"""
+async def _invoke_set_member_rank(tagger, channel, peer, title):
+    """ست تگ با اکانت تگر — اول تابع کتابخانه، بعد TL دست‌ساز؛ خطای واقعی برمی‌گرداند"""
     from pyrogram import raw
+    err = ""
+    fn = getattr(raw.functions.channels, "SetMemberRank", None)
+    if fn is not None:
+        try:
+            await tagger.invoke(fn(channel=channel, peer=peer, rank=title))
+            return True, title
+        except Exception as e:
+            err = f"lib: {e}"
+    else:
+        err = "lib: SetMemberRank تولید نشده"
+    if _SetMemberRankRaw is not None:
+        try:
+            await tagger.invoke(_SetMemberRankRaw(channel=channel, peer=peer, rank=title))
+            return True, title
+        except Exception as e:
+            err += f" | raw: {e}"
+    if "SESSION_REVOKED" in err or "AUTH_KEY_UNREGISTERED" in err or "AUTH_KEY_INVALID" in err:
+        global _tagger_client
+        _tagger_client = None   # تا تلاش بعدی سشن تازه کپی شود
+    return False, err
+
+async def _apply_member_tag(client, chat_id, user_id, member=None):
+    """ست کردن تگ لِوِل — ادمین با editAdmin، عضو عادی با setMemberRank (هر دو از تگر)"""
     try:
+        tagger = await _get_tagger_client()
+        if tagger is None:
+            return False
+        # کاربر + access_hash — ترجیحاً از member، وگرنه از تگر
         u = None
         if member is not None and getattr(member, "user", None) is not None:
             u = member.user
+        status = getattr(member, "status", None) if member is not None else None
         if u is None or getattr(u, "access_hash", None) is None:
             try:
                 m2 = await tagger.get_chat_member(chat_id, user_id)
                 u = m2.user
+                status = m2.status
             except Exception as e:
+                _last_tag_errors[(chat_id, user_id)] = f"عضو پیدا نشد: {e}"
                 print(f"⚠️ تگ {user_id}: عضو پیدا نشد: {e}", flush=True)
                 return False
         if getattr(u, "is_bot", False):
@@ -267,68 +340,60 @@ async def _tag_member(tagger, chat_id, user_id, member=None):
         key = (chat_id, user_id)
         if _last_set_titles.get(key) == title:
             return True
+        # مالک گروه: تلگرام اجازه تغییر تگ مالک را به هیچ‌کس نمیدهد — بی‌صدا رد شو
+        if status == enums.ChatMemberStatus.OWNER:
+            print(f"ℹ️ تگ: {user_id} مالک گروه است — تلگرام اجازه نمیدهد", flush=True)
+            return False
+        if status == enums.ChatMemberStatus.ADMINISTRATOR:
+            # ادمین → editAdmin با rank (مسیر رسمی تلگرام برای تگ ادمین‌ها)
+            try:
+                await tagger.set_administrator_title(chat_id, user_id, title)
+                _last_set_titles[key] = title
+                return True
+            except Exception:
+                pass   # فالبک به setMemberRank
+        # عضو عادی (و فالبک ادمین) → setMemberRank
+        from pyrogram import raw
         ah = getattr(u, "access_hash", None)
-        if ah is not None:
+        if ah:
             peer = raw.types.InputPeerUser(user_id=u.id, access_hash=ah)
         else:
             try:
                 peer = await tagger.resolve_peer(user_id)
             except Exception as e:
+                _last_tag_errors[(chat_id, user_id)] = f"peer: {e}"
                 print(f"⚠️ تگ {user_id}: peer: {e}", flush=True)
                 return False
         try:
             chat_peer = await tagger.resolve_peer(chat_id)
         except Exception as e:
+            _last_tag_errors[(chat_id, user_id)] = f"resolve گروه: {e}"
             print(f"⚠️ تگ: گروه {chat_id}: {e}", flush=True)
             return False
         if isinstance(chat_peer, raw.types.InputPeerChannel):
             channel = raw.types.InputChannel(channel_id=chat_peer.channel_id, access_hash=chat_peer.access_hash)
         else:
-            print(f"⚠️ تگ: گروه {chat_id} سوپرگروه نیست", flush=True)
+            _last_tag_errors[(chat_id, user_id)] = "گروه سوپرگروه نیست"
             return False
-        err = ""
-        fn = getattr(raw.functions.channels, "SetMemberRank", None)
-        if fn is not None:
-            try:
-                await tagger.invoke(fn(channel=channel, peer=peer, rank=title))
-                _last_set_titles[key] = title
-                return True
-            except Exception as e:
-                err = f"lib: {e}"
-        if _SetMemberRankRaw is not None:
-            try:
-                await tagger.invoke(_SetMemberRankRaw(channel=channel, peer=peer, rank=title))
-                _last_set_titles[key] = title
-                return True
-            except Exception as e:
-                err += f" | raw: {e}"
-        print(f"⚠️ تگ {user_id} در گروه {chat_id} ست نشد: {err}", flush=True)
+        ok, detail = await _invoke_set_member_rank(tagger, channel, peer, title)
+        if ok:
+            _last_set_titles[key] = title
+            return True
+        _last_tag_errors[(chat_id, user_id)] = detail
+        print(f"⚠️ تگ {user_id} در گروه {chat_id} ست نشد: {detail}", flush=True)
         return False
     except Exception as e:
-        print(f"⚠️ خطا در ست تگ عضو {user_id}: {e}", flush=True)
-        return False
-
-async def _apply_member_tag(client, chat_id, user_id, member=None):
-    """wrapper — همیشه از تگر استفاده می‌کند"""
-    try:
-        tagger = await _get_tagger_client()
-        if tagger is None:
-            return False
-        return await _tag_member(tagger, chat_id, user_id, member)
-    except Exception as e:
+        _last_tag_errors[(chat_id, user_id)] = str(e)
         print(f"⚠️ خطا در ست تگ عضو {user_id}: {e}", flush=True)
         return False
 
 async def _try_set_admin_title(client, chat_id, user_id):
     """تگ لِوِل — برای «لول» و tagdebug؛ نتیجه واقعی برمی‌گرداند"""
     try:
-        tagger = await _get_tagger_client()
-        if tagger is None:
-            return False, "تگر در دسترس نیست (سلف خودت را یک بار فعال کن)"
-        ok = await _tag_member(tagger, chat_id, user_id)
+        ok = await _apply_member_tag(client, chat_id, user_id)
         if ok:
             return True, _admin_title_for(user_id)
-        return False, "جزئیات دقیق در لاگ سرور (خط ⚠️)"
+        return False, _last_tag_errors.get((chat_id, user_id), "خطای نامشخص — لاگ را ببین")
     except Exception as e:
         return False, str(e)[:100]
 
@@ -357,7 +422,7 @@ async def _get_tag_group_ids(client):
     return _TAG_GROUP_IDS
 
 async def _sync_all_admin_tags(client, chat_id):
-    """تگ همه ادمین‌ها — با تگر (لیست اعضا هم از تگر گرفته می‌شود)"""
+    """تگ همه ادمین‌ها — با تگر"""
     try:
         tagger = await _get_tagger_client()
         if tagger is None:
@@ -366,7 +431,7 @@ async def _sync_all_admin_tags(client, chat_id):
         async for m in tagger.get_chat_members(chat_id, filter=enums.ChatMembersFilter.ADMINISTRATORS):
             if m.user.is_bot:
                 continue
-            if await _tag_member(tagger, chat_id, m.user.id, m):
+            if await _apply_member_tag(client, chat_id, m.user.id, m):
                 count += 1
             await asyncio.sleep(0.4)
         return count
@@ -374,27 +439,32 @@ async def _sync_all_admin_tags(client, chat_id):
         return 0
 
 async def _full_member_tag_sync(client, chat_id):
-    """تگ «همه اعضای موجود» گروه — با تگر؛ سازنده هم امتحان می‌شود"""
+    """تگ «همه اعضای موجود» — با تگر؛ اگر اولین عضو عادی شکست بخورد، متوقف می‌شود (بدون اسپم)"""
     try:
         tagger = await _get_tagger_client()
         if tagger is None:
-            print("⛔ تگ‌گذاری گروه: تگر در دسترس نیست (سلف خودت را یک بار فعال کن)", flush=True)
+            print("⛔ تگ‌گذاری گروه: تگر در دسترس نیست — سلف خودت را یک بار فعال کن", flush=True)
             return 0
         count = 0
-        failed = 0
+        aborted = False
         async for m in tagger.get_chat_members(chat_id, limit=10000):
             try:
                 if m.user.is_bot:
                     continue
-                if await _tag_member(tagger, chat_id, m.user.id, m):
+                ok = await _apply_member_tag(client, chat_id, m.user.id, m)
+                if ok:
                     count += 1
-                else:
-                    failed += 1
+                elif m.status != enums.ChatMemberStatus.OWNER:
+                    detail = _last_tag_errors.get((chat_id, m.user.id), "نامشخص")
+                    print(f"⛔ تگ‌گذاری گروه {chat_id} متوقف شد (عضو {m.user.id}): {detail}", flush=True)
+                    print("💡 این خطا را کپی کن و بفرست — ارور واقعی سرور تلگرام است", flush=True)
+                    aborted = True
+                    break
                 await asyncio.sleep(0.4)
             except Exception:
                 continue
-        if count == 0 and failed > 0:
-            print(f"⛔ تگ‌گذاری گروه {chat_id}: هیچ تگی ست نشد ({failed} شکست) — اولین خطای ⚠️ بالای لاگ را ببین", flush=True)
+        if aborted:
+            print("💡 خطای بالا را کپی کن و بفرست — یک‌خطی فیکس می‌شود", flush=True)
         return count
     except Exception as e:
         print(f"⛔ خطا در تگ‌گذاری گروه {chat_id}: {e}", flush=True)
@@ -530,7 +600,7 @@ class JSONDatabase:
                     "users": {}, "processes": {}, "temp_data": {}, "credits": {},
                     "timers": {}, "payments": {}, "group_bets": {}, "doz_games": {},
                     "rps_games": {}, "userstats": {}, "last_spin": {}, "daily_bets": {},
-                    "levels": {}, "tagged_chats": [],
+                    "levels": {}, "tagged_chats": {}, "proc_started": {},
                     "settings": {"diamond_rate": DIAMOND_RATE, "toman_per_diamond": TOMAN_PER_DIAMOND, "admin_id": ADMIN_ID}
                 }
                 self.save_data(initial_data)
@@ -540,7 +610,7 @@ class JSONDatabase:
                 "users": {}, "processes": {}, "temp_data": {}, "credits": {}, "timers": {},
                 "payments": {}, "group_bets": {}, "doz_games": {}, "rps_games": {},
                 "userstats": {}, "last_spin": {}, "daily_bets": {}, "levels": {},
-                "tagged_chats": [], "settings": {}
+                "tagged_chats": {}, "proc_started": {}, "settings": {}
             }
 
     def save_data(self, data=None):
@@ -703,6 +773,7 @@ async def apply_restore(path):
     db.data = db.load_data()
     db.data["processes"] = {}
     db.data["timers"] = {}
+    db.data["proc_started"] = {}
     db.save_data()
 
     restarted = 0
@@ -1555,6 +1626,7 @@ def run_selfbot(user_id, phone=None):
         pid = process.pid
 
         db.set("processes", user_id, pid)
+        db.set("proc_started", user_id, time.time())
 
         with open(f"process_{user_id}.pid", "w") as f:
             f.write(str(pid))
@@ -1600,6 +1672,7 @@ def stop_selfbot(user_id, reason=""):
                 print(f"⚠️ خطا در قطع پروسس: {e}")
 
             db.delete("processes", user_id)
+            db.delete("proc_started", user_id)
 
             try:
                 os.remove(f"process_{user_id}.pid")
@@ -1629,6 +1702,7 @@ def stop_all_selfbots():
             except:
                 pass
         db.data["processes"], db.data["timers"] = {}, {}
+        db.data["proc_started"] = {}
         db.save_data()
     except:
         pass
@@ -1999,8 +2073,8 @@ async def start_activation_with_phone(client, reply_target, uid, phone_digits):
         try:
             sent = await user_client.send_code(phone_digits)
         except Exception as inner:
-            if "AUTH_KEY_UNREGISTERED" in str(inner) or "AUTH_KEY_INVALID" in str(inner):
-                # 💀 سشن قبلی مُده — پاک و از نو
+            if "AUTH_KEY_UNREGISTERED" in str(inner) or "AUTH_KEY_INVALID" in str(inner) or "SESSION_REVOKED" in str(inner):
+                # 💀 سشن قبلی مُده/باطل — پاک و از نو
                 try:
                     await user_client.disconnect()
                 except Exception:
@@ -2143,7 +2217,7 @@ async def ping_cmd(client, message):
     await message.reply_text(f"🏓 پونگ! بات زنده است ⏰ {time.strftime('%H:%M:%S')}")
 
 # ==============================================================================
-# 🔧 تشخیص تگ — تست روی خودت + تست روی اولین عضو عادی (جواب قطعی)
+# 🔧 تشخیص تگ — تست واقعی روی اولین عضو عادی (جواب قطعی سرور تلگرام)
 # ==============================================================================
 @bot.on_message(filters.command("tagdebug") & filters.user(ADMIN_ID))
 async def tag_debug_cmd(client, message: Message):
@@ -2163,32 +2237,32 @@ async def tag_debug_cmd(client, message: Message):
         return
     tagger = await _get_tagger_client()
     lines.append(f"🧑‍💻 تگر (اکانت ادمین): {'✅ وصل' if tagger else '❌ وصل نشد — سلف خودت را فعال کن'}")
+    lines.append(f"🔩 کلاس TL خام: {'✅ ساخته شد' if _SetMemberRankRaw is not None else '❌ در دسترس نیست'}")
+    try:
+        from pyrogram import raw as _raw
+        lines.append(f"📚 تابع کتابخانه: {'✅ موجود' if getattr(_raw.functions.channels, 'SetMemberRank', None) else '❌ تولید نشده (فالبک TL خام استفاده می‌شود)'}")
+    except Exception:
+        pass
     await message.reply_text("\n".join(lines))
     if tagger is None:
         return
 
-    # تست ۱: تگ روی خودت (سازنده — تلگرام ممکن است اجازه ندهد)
-    ok, res = await _try_set_admin_title(client, chat_id, ADMIN_ID)
-    if ok:
-        await message.reply_text(f"✅ تست تگ روی خودت موفق: **{res}**")
-    else:
-        await message.reply_text("⚠️ تست روی خودت (سازنده) موفق نبود — حالا یک عضو عادی تست می‌کنیم...")
-
-    # تست ۲: تگ روی اولین عضو عادی — جواب قطعی سیستم
+    # تست واقعی: روی اولین عضو عادی — جواب قطعی
     try:
         test_done = False
         async for m in tagger.get_chat_members(chat_id, limit=200):
             if m.user.is_bot or m.user.id == ADMIN_ID:
                 continue
-            ok2 = await _tag_member(tagger, chat_id, m.user.id, m)
+            ok2 = await _apply_member_tag(client, chat_id, m.user.id, m)
             if ok2:
                 await message.reply_text(f"✅ تست تگ روی عضو عادی `{m.user.id}` موفق بود — سیستم سالم است! 👑\nاز این به بعد همه اعضا خودکار تگ می‌گیرند.")
             else:
-                await message.reply_text(f"❌ تست تگ روی عضو عادی `{m.user.id}` ناموفق — خطای دقیق ⚠️ در لاگ Railway را بفرست")
+                detail = _last_tag_errors.get((chat_id, m.user.id), "نامشخص")
+                await message.reply_text(f"❌ تست تگ روی عضو عادی `{m.user.id}` ناموفق:\n\n`{detail}`")
             test_done = True
             break
         if not test_done:
-            await message.reply_text("ℹ️ عضو عادی دیگری در گروه پیدا نشد برای تست — یک نفر دیگر را به گروه اضافه کن و دوباره /tagdebug بزن")
+            await message.reply_text("ℹ️ عضو عادی دیگری در گروه پیدا نشد — یک نفر دیگر را به گروه اضافه کن و دوباره /tagdebug بزن")
     except Exception as e:
         await message.reply_text(f"❌ خطا در تست عضو عادی: {e}")
 
@@ -3505,48 +3579,88 @@ async def _auto_restart_on_boot():
         print(f"🚀 {restarted} سلف فعال پس از استارت بات دوباره راه‌اندازی شد", flush=True)
 
 # ==============================================================================
-# 💀 نگهبان سلف‌ها — پروسه‌های مُرده را پیدا، پاکسازی و به کاربر خبر می‌دهد
+# 💀 نگهبان سلف‌ها نسخه ۲ — پروسه مُده + پروسه «فریز» (سشن باطل) را پیدا می‌کند
+# سلفِ گیرکرده توی حلقه SESSION_REVOKED دیگه فایل state را به‌روز نمی‌کند؛
+# وقتی state بیش از ۵ دقیقه کهنه شد، پروسه کشته و کاربر خبردار می‌شود
 # ==============================================================================
 async def _selfbot_watchdog():
-    await asyncio.sleep(20)
+    await asyncio.sleep(25)
     while True:
         try:
             for uid_s, pid in list(db.data.get("processes", {}).items()):
                 uid = int(uid_s)
+                alive = True
                 try:
                     os.kill(int(pid), 0)
-                    continue
                 except (ProcessLookupError, TypeError, ValueError):
-                    pass
+                    alive = False
                 except PermissionError:
+                    alive = True
+
+                # ⏱ چک فریز: کهنگی فایل state یا زمان استارت
+                hung = False
+                if alive:
+                    updated = 0.0
+                    try:
+                        updated = os.path.getmtime(f"selfbot_state_{uid}.json")
+                    except Exception:
+                        try:
+                            with open(f"selfbot_state_{uid}.json", "r", encoding="utf-8") as f:
+                                updated = (json.load(f) or {}).get("updated", 0) or 0
+                        except Exception:
+                            updated = 0.0
+                    started = db.get("proc_started", uid, 0) or 0
+                    healthy = max(updated or 0, started or 0)
+                    if healthy and (time.time() - healthy > 300):
+                        hung = True
+
+                if alive and not hung:
                     continue
-                # --- پروسه مُده ---
+
+                # --- پاکسازی ---
+                if alive and hung:
+                    try:
+                        os.kill(int(pid), 9)
+                    except Exception:
+                        pass
+                    try:
+                        subprocess.run(["pkill", "-f", f"self\\.py {uid}( |$)"], capture_output=True, check=False)
+                    except Exception:
+                        pass
+
                 db.delete("processes", uid)
+                db.delete("proc_started", uid)
                 if uid in user_timers:
                     user_timers[uid].stop()
                     user_timers.pop(uid, None)
                 u = db.get("users", uid, {})
                 if u:
                     u["status"] = "suspended"
-                    u.pop("phone", None)
                     db.set("users", uid, u)
                 try:
                     os.remove(f"process_{uid}.pid")
                 except Exception:
                     pass
+
+                reason_line = ("🔒 سشن اکانت شما منقضی/باطل شده است\n"
+                               "(از «تنظیمات ← دستگاه‌ها» پایان داده شده یا تلگرام باطلش کرده)"
+                               if hung else "پروسه سلف به‌دلیل خطا خاموش شده است")
                 send_async(bot.send_message(
                     uid,
                     "❌ **سلف شما خاموش شد!**\n\n"
-                    "🔒 سشن اکانت شما منقضی شده است\n"
-                    "(مثلاً از «تنظیمات ← دستگاه‌ها» در تلگرام پایان داده شده، "
-                    "یا تلگرام آن را باطل کرده)\n\n"
+                    f"{reason_line}\n\n"
                     "💎 الماس های شما حفظ شده!\n"
-                    "🔄 برای روشن کردن دوباره، فقط یک بار لاگین کن:",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("⚡ فعالسازی مجدد سلف", callback_data="activate_self", style=KeyboardButtonStyle(bg_success=True))
-                    ]])
+                    "🔄 اگر سشن سالم است، دکمه «روشن کردن مجدد» را بزن؛\n"
+                    "اگر جواب نداد، یک بار «فعالسازی سلف» کن:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🚀 روشن کردن مجدد", callback_data="resume_self", style=KeyboardButtonStyle(bg_success=True))],
+                        [InlineKeyboardButton("⚡ فعالسازی مجدد سلف", callback_data="activate_self", style=KeyboardButtonStyle(bg_primary=True))]
+                    ])
                 ))
-                print(f"💀 سلف کاربر {uid} مُرده بود (سشن منقضی) — پاکسازی و اطلاع‌رسانی شد", flush=True)
+                if hung:
+                    print(f"💀 سلف کاربر {uid} فریز شده بود (state کهنه) — کشته و اطلاع‌رسانی شد", flush=True)
+                else:
+                    print(f"💀 سلف کاربر {uid} مُرده بود — پاکسازی و اطلاع‌رسانی شد", flush=True)
         except Exception as e:
             print(f"⚠️ خطای watchdog: {e}", flush=True)
         await asyncio.sleep(120)
@@ -3556,7 +3670,7 @@ async def _selfbot_watchdog():
 # ==============================================================================
 async def _tag_sync_loop():
     """۱) اول استارت: تگ «همه اعضای موجود» گروه عضویت اجباری (با اکانت تگر)
-    ۲) سپس هر ۵ دقیقه: همگام‌سازی ادمین‌ها + اعضای تازه‌وارد"""
+    ۲) سپس هر ۵ دقیقه: همگام‌سازی ادمین‌ها"""
     await asyncio.sleep(30)
     try:
         for gid in await _get_tag_group_ids(bot):
