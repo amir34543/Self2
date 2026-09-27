@@ -245,13 +245,19 @@ async def _get_tagger_client():
 # ==============================================================================
 _TLBase = None
 try:
-    from pyrogram.raw.core import TLRequest as _TLBase
+    # مسیر ۱ — استاندارد pyrogram 2.x / PyrogramMod
+    from pyrogram.raw.base import TLRequest as _TLBase
 except ImportError:
     try:
-        from pyrogram.raw.core.tl_request import TLRequest as _TLBase
+        # مسیر ۲ — نسخه‌های قدیمی‌تر
+        from pyrogram.raw.core import TLRequest as _TLBase
     except ImportError:
-        _TLBase = None
-
+        try:
+            # مسیر ۳ — از یک تابع واقعی تولیدشده، کلاس پایه‌اش را قرض بگیر
+            from pyrogram.raw.functions.messages.send_reaction import SendReaction as _TLBase
+        except ImportError:
+            _TLBase = None
+print(f"🔩 پایه TL تگ: {'✅ ' + _TLBase.__name__ if _TLBase is not None else '❌ هیچ مسیری کار نکرد'}", flush=True)
 if _TLBase is not None:
     from io import BytesIO as _BytesIO
     from pyrogram.raw.core.primitives import Int as _Int, String as _String
