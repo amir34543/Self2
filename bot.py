@@ -2355,12 +2355,28 @@ async def tag_debug_cmd(client, message: Message):
                 )
             test_done = True
             break
+
         if not test_done:
             await message.reply_text(
                 "ℹ️ عضو عادی قابل تست پیدا نشد — یک عضو عادی در گروه داشته باش و دوباره /tagdebug بزن"
             )
+            return
+
+        # ✅ بعد از تست، کل اعضای موجود گروه هم یک‌جا همگام می‌شوند.
+        # این باعث می‌شود /tagdebug فقط تست یک نفر نباشد و تگ همه اعضای
+        # قابل‌تگ نیز در همان لحظه اعمال شود. اعضای جدید هم در event ورود
+        # به‌صورت خودکار تگ می‌گیرند.
+        sync_count = await _full_member_tag_sync(client, chat_id)
+        try:
+            await message.reply_text(
+                f"🏷️ همگام‌سازی کامل انجام شد.\n"
+                f"✅ تگ‌شده: {sync_count} عضو\n"
+                f"👑 از این به بعد اعضای جدید هم خودکار تگ می‌گیرند."
+            )
+        except Exception:
+            pass
     except Exception as e:
-        await message.reply_text(f"❌ خطا در تست عضو عادی: {e}")
+        await message.reply_text(f"❌ خطا در تست/همگام‌سازی تگ: {e}")
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
@@ -3797,10 +3813,10 @@ async def _tag_sync_loop():
     while True:
         try:
             for chat_id in list(db.data.get("tagged_chats", [])):
-                await _sync_all_admin_tags(bot, chat_id)
+                await _full_member_tag_sync(bot, chat_id)
                 await asyncio.sleep(1)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"ℹ️ خطای همگام‌سازی دوره‌ای تگ‌ها: {e}", flush=True)
         await asyncio.sleep(300)
 
 if __name__ == "__main__":
