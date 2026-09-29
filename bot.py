@@ -1,6 +1,6 @@
 from pyrogram import Client, filters, idle, StopPropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from pyrogram.errors import SessionPasswordNeeded, MessageNotModified
+from pyrogram.errors import SessionPasswordNeeded, MessageNotModified, AuthKeyUnregistered
 import json, os, asyncio, subprocess, sys, time, threading, random
 import html, re, zipfile, shutil
 import logging
@@ -395,6 +395,7 @@ async def _invoke_set_member_rank(tagger, channel, peer, title):
                 _resolved_rank_cid = None   # کش غلط بود، دوباره کشف کن
 
     # ۳) کاندیدها را یکی‌یکی امتحان کن
+    _rank_attempt_errors = []
     for cid in _candidate_rank_ids():
         if cid == _resolved_rank_cid:
             continue
@@ -420,6 +421,7 @@ async def _invoke_set_member_rank(tagger, channel, peer, title):
             return False, f"سرور: {es}"
         except Exception as e:
             err = str(e)
+            _rank_attempt_errors.append(f"CID {cid}: {repr(e)}")
             print(f"❌ SetMemberRank CID {cid} شکست خورد: {repr(e)}", flush=True)
             if "SESSION_REVOKED" in err or "AUTH_KEY" in err:
                 global _tagger_client
@@ -427,6 +429,8 @@ async def _invoke_set_member_rank(tagger, channel, peer, title):
                 return False, f"سرور: {err}"
             continue
 
+    if _rank_attempt_errors:
+        return False, "SetMemberRank شکست خورد:\n" + "\n".join(_rank_attempt_errors[-5:])
     return False, "هیچ شناسه‌ای از سمت تلگرام پذیرفته نشد"
 
 
@@ -696,6 +700,78 @@ def get_random_api():
     return random.choice(API_CREDENTIALS)
 
 bot = Client("bot", bot_token=BOT_TOKEN, api_id=API_CREDENTIALS[0]["api_id"], api_hash=API_CREDENTIALS[0]["api_hash"])
+
+# ==============================================================================
+# 🛡️ مراقبت از سشن بات اصلی — بازیابی خودکار AUTH_KEY_UNREGISTERED روی Railway
+# اگر Telegram authorization key بات را باطل کند، Pyrogram همان session محلی را
+# نگه می‌دارد و درخواست‌های بعدی با 401 AUTH_KEY_UNREGISTERED شکست می‌خورند.
+# این watchdog خطا را تشخیص می‌دهد، فقط session بات اصلی را حذف می‌کند و
+# همان پروسه را دوباره اجرا می‌کند تا session تازه با BOT_TOKEN ساخته شود.
+# سشن‌های سلف کاربران دست‌نخورده می‌مانند.
+# ==============================================================================
+_BOT_SESSION_PREFIX = "bot.session"
+_bot_recovery_lock = asyncio.Lock()
+_bot_recovering = False
+
+def _is_invalid_bot_auth(exc):
+    """تشخیص خطاهای fatal مربوط به authorization key بات اصلی."""
+    if isinstance(exc, AuthKeyUnregistered):
+        return True
+    msg = str(exc).upper()
+    return "AUTH_KEY_UNREGISTERED" in msg or "AUTH_KEY_INVALID" in msg
+
+def _remove_bot_session_files():
+    """فقط فایل‌های session بات اصلی را حذف می‌کند."""
+    removed = []
+    base = os.path.dirname(os.path.abspath(_BOT_SESSION_PREFIX)) or "."
+    prefix = os.path.basename(_BOT_SESSION_PREFIX)
+    try:
+        for name in os.listdir(base):
+            if name == prefix or name.startswith(prefix + "-"):
+                path = os.path.join(base, name)
+                if os.path.isfile(path):
+                    try:
+                        os.remove(path)
+                        removed.append(path)
+                    except FileNotFoundError:
+                        pass
+    except Exception as e:
+        print(f"⚠️ پاکسازی سشن بات ناموفق بود: {e}", flush=True)
+    return removed
+
+async def _recover_main_bot_session(reason):
+    """سشن باطل بات را پاک و پروسه را تمیز ری‌استارت می‌کند."""
+    global _bot_recovering
+    async with _bot_recovery_lock:
+        if _bot_recovering:
+            return
+        _bot_recovering = True
+        print("🚨 سشن بات اصلی باطل شده است — بازیابی خودکار شروع شد", flush=True)
+        print(f"   دلیل: {reason}", flush=True)
+        try:
+            if getattr(bot, "is_connected", False):
+                try:
+                    await bot.stop()
+                except Exception as e:
+                    print(f"ℹ️ توقف بات هنگام بازیابی: {e}", flush=True)
+        finally:
+            removed = _remove_bot_session_files()
+            print(f"🧹 فایل‌های سشن بات پاک شد: {len(removed)} فایل", flush=True)
+            print("♻️ پروسه برای ساخت سشن تازه با BOT_TOKEN ری‌استارت می‌شود...", flush=True)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+async def _bot_session_watchdog():
+    """هر ۴۵ ثانیه سلامت authorization بات اصلی را با get_me بررسی می‌کند."""
+    await asyncio.sleep(20)
+    while True:
+        try:
+            await bot.get_me()
+        except Exception as e:
+            if _is_invalid_bot_auth(e):
+                await _recover_main_bot_session(e)
+                return
+            print(f"ℹ️ health-check بات: {e}", flush=True)
+        await asyncio.sleep(45)
 
 admin_photo_wait = set()
 admin_restore_wait = set()
@@ -3813,12 +3889,27 @@ if __name__ == "__main__":
     async def main():
         global BOT_LOOP
         BOT_LOOP = asyncio.get_running_loop()
-        await bot.start()
+        try:
+            await bot.start()
+        except Exception as e:
+            # اگر session ذخیره‌شده از قبل باطل شده باشد، قبل از شروع handlerها بازیابی شود.
+            if _is_invalid_bot_auth(e):
+                await _recover_main_bot_session(e)
+                return
+            raise
+
         asyncio.create_task(_auto_restart_on_boot())
         asyncio.create_task(_tag_sync_loop())     # 👑 تگ خودکار همه اعضا
         asyncio.create_task(_selfbot_watchdog())  # 💀 نگهبان سلف‌ها
-        print("✅ بات آماده است", flush=True)
-        await idle()
-        await bot.stop()
+        asyncio.create_task(_bot_session_watchdog())  # 🛡️ نگهبان سشن بات اصلی
+        print("✅ بات آماده است | 🛡️ health-check سشن فعال شد", flush=True)
+        try:
+            await idle()
+        finally:
+            if getattr(bot, "is_connected", False):
+                try:
+                    await bot.stop()
+                except Exception:
+                    pass
 
     bot.run(main())
