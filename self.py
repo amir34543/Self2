@@ -22,6 +22,7 @@ except ImportError:
     class ChannelPrivate(Exception): pass
 
 bot_username = "Helperbotpersian_bot"  # یوزرنیم ربات هلپر بدون @
+premium_bot_username = "NetifyPremiumBot"  # یوزرنیم ربات ایموجی پریمیوم (اینلاین) بدون @
 
 USER_ID = None
 PHONE = None
@@ -327,7 +328,7 @@ CMD_STARTERS = ("بایو", "یوزر", "نام", "ترجمه", "آب", "بار�
                 "افزودن", "سکوت", "رفع", "مخاطب", "شماره", "تاس", "ریسه", "جک", "شانس", "قلم", "ویوئر",
                 "فضول", "سلامت", "ویرایش", "تنظیم", "لیست", "فرمت", "انتی", "آنلاین", "شنود", "تایم",
                 "پاکسازی", "منوی", "بنر", "زمان", "وضعیت", "ریست", "قفل", "بازکردن", "پروفایل", "عکس",
-                "پنل", "panel", "منش", "امضا", "جمنای", "هوش", "آهنگ", "موزیک", "اسم", "شزم", "اصلاح", "خلاصه", "متن", "تبدیل", "تبچی")
+                "پنل", "panel", "منش", "امضا", "جمنای", "هوش", "آهنگ", "موزیک", "اسم", "شزم", "اصلاح", "خلاصه", "متن", "تبدیل", "تبچی", "پریمیوم")
 
 # ==============================================================================
 # ★ هندلر پنل (اول از همه تا با بقیه تداخل نکند) ★
@@ -3222,6 +3223,39 @@ async def premoji_cmd(client, message):
         await message.delete()
     except Exception as e:
         await _safe_edit(message, f"❌ `{e}`")
+
+# ---------------------------------------------------------------- 💎 پریمیوم اینلاین (@NetifyPremiumBot)
+# استفاده:  پریمیوم 5368324170671202286 سلام دنیا
+# همان کاری که دستی با «@NetifyPremiumBot آیدی متن» می‌کردی را خودکار انجام می‌دهد
+@app.on_message(filters.me & filters.regex(r"^پریمیوم( .+)?$"))
+async def premium_inline_cmd(client, message):
+    parts = (message.text or "").split(" ", 1)
+    query = parts[1].strip() if len(parts) > 1 else ""
+    if not query and message.reply_to_message:
+        query = (message.reply_to_message.text or message.reply_to_message.caption or "").strip()
+    if not query:
+        return await _safe_edit(message, "❌ `پریمیوم آیدی_عددی متن`\nمثال: `پریمیوم 5368324170671202286 سلام`")
+    try:
+        results = await client.get_inline_bot_results(premium_bot_username, query)
+        if not (results and results.results):
+            return await _safe_edit(message, "❌ بات نتیجه‌ای نداد (آیدی یا متن را چک کن)")
+        reply_to = message.reply_to_message.id if message.reply_to_message else None
+        await client.send_inline_bot_result(chat_id=message.chat.id, query_id=results.query_id,
+                                            result_id=results.results[0].id,
+                                            reply_to_message_id=reply_to)
+        try: await message.delete()
+        except Exception: pass
+    except FloodWait as e:
+        await _safe_edit(message, f"⏳ فلود‌ویت: {e.value} ثانیه صبر کن")
+    except Exception as e:
+        err = str(e)
+        if "BOT_RESPONSE_TIMEOUT" in err or "Timeout" in err:
+            await _safe_edit(message, "❌ @NetifyPremiumBot پاسخ نداد (روشن نیست یا اینلاین فعال نیست)")
+        elif any(k in err for k in ("INLINE_BOT_REQUIRED", "BOT_INLINE_DISABLED", "WRITE_FORBIDDEN", "SEND_INLINE")):
+            await _safe_edit(message, "❌ در این چت اجازه ارسال اینلاین نیست")
+        else:
+            await _safe_edit(message, f"❌ `{err[:300]}`")
+    raise StopPropagation
 
 # ---------------------------------------------------------------- 🎥 ساخت ویدیو گرد
 def _ffmpeg_exe():
