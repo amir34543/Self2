@@ -265,13 +265,13 @@ print(
 
 
 SUPPORT_USERNAME = "Aliconfigs"
-BUY_CHANNEL_USERNAME = "SelfPersiangulf"
+BUY_CHANNEL_USERNAME = "SelfPersian"
 HELPER_BOT_USERNAME = "Helpselfbotvippersian_bot"
 
 os.makedirs("sessions", exist_ok=True)
 
 FORCE_CHANNELS = [
-    "SelfPersiangulf",
+    "SelfPersian",
 ]
 
 # 👥 گروه عضویت اجباری — تگ لِوِل اعضا به‌محض عضویت در این گروه ست می‌شود
