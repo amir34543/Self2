@@ -282,7 +282,8 @@ PAGE_GRIDS = {
         [("🎬 انیمیشن", "anim")],
         [("⭐ استارزی", "stars"), ("💎 موجودی", "balance")],
         [("😍 ایموجی پریمیوم", "premoji"), ("🎥 ساخت ویدیو گرد", "roundvid")],
-        [("⏳ ذخیره تایمدار", "timedsave"), ("🤖 هوش مصنوعی", "ai")]],
+        [("⏳ ذخیره تایمدار", "timedsave"), ("🤖 هوش مصنوعی", "ai")],
+        [("📢 تبچی دکمه‌ای", "tabchi")]],
 }
 # هر بخش به کدام صفحه برمی‌گردد (پیش‌فرض: صفحه ۱)
 CAT_PAGE = {k: pg for pg, grid in PAGE_GRIDS.items() for row in grid for _, k in row}
@@ -984,7 +985,8 @@ def get_glass_keyboard(uid, cat, state):
     rows.append([btn("🔙 بازگشت به پنل", f"p:pg:{uid}:{CAT_PAGE.get(cat, 1)}", S("p"))])
     return InlineKeyboardMarkup(rows)
 
-CAT_EXTRA_NAV = {"clock": [("🕐 فونت ساعت", "fontclock"), ("🔤 فونت متن", "fonttext")]}
+CAT_EXTRA_NAV = {"clock": [("🕐 فونت ساعت", "fontclock"), ("🔤 فونت متن", "fonttext")],
+                 "sender": [("📢 مدیریت دکمه‌ای تبچی", "tabchi")]}
 
 def _back_button(uid, cat):
     if cat in CAT_BACK_TO_CAT:
@@ -1002,7 +1004,9 @@ def cat_view(uid, cat, state):
             rows.append([btn(label, f"p:cat:{uid}:{target}", S("p"))])
         rows.append([_back_button(uid, cat)])
         return text + GLASS_HEADER, InlineKeyboardMarkup(rows)
-    return text, InlineKeyboardMarkup([[_back_button(uid, cat)]])
+    rows = [[btn(label, f"p:cat:{uid}:{target}", S("p"))] for label, target in CAT_EXTRA_NAV.get(cat, [])]
+    rows.append([_back_button(uid, cat)])
+    return text, InlineKeyboardMarkup(rows)
 
 def build_account_text(state):
     if not state_online(state):
@@ -1076,11 +1080,99 @@ def locks_page_text(state):
             f"فوروارد: {on('فوروارد')}\nویس: {on('ویس')}\nپیام: {on('پیام')}\nفایل: {on('فایل')}\n\n"
             "پیام‌های قفل‌شده در پیوی به‌صورت خودکار حذف می‌شوند.")
 
+TABCHI_GROUPS_PER_PAGE = 8
+
+def _fmt_secs_h(sec):
+    sec = int(max(0, sec))
+    if sec < 60: return f"{sec} ثانیه"
+    m, s = divmod(sec, 60)
+    if m < 60: return f"{m} دقیقه" + (f" و {s} ثانیه" if s else "")
+    hh, m = divmod(m, 60)
+    return f"{hh} ساعت" + (f" و {m} دقیقه" if m else "")
+
+def tabchi_page_text(state):
+    if not state_online(state):
+        return "⚠️ <b>سلف آفلاین است</b>\nبرای مدیریت دکمه‌ای تبچی، سلف باید روشن باشد."
+    t = (state or {}).get("settings", {}).get("tabchi", {})
+    codes = t.get("codes") or []
+    rounds_txt = "نامحدود" if t.get("max_rounds") is None else f"{t.get('rounds_done', 0)}/{t.get('max_rounds')}"
+    lines = [
+        "📢 <b>تبچی — ارسال خودکار چرخشی</b>\n",
+        "🟢 روشن" if t.get("active") else "🔴 خاموش",
+        f"📋 بنرهای در چرخش: {', '.join(codes) if codes else '—'}",
+        f"⏱ فاصله هر دور: {_fmt_secs_h(t.get('interval', 300))}",
+        f"🔁 دور: {rounds_txt}",
+        f"🚫 گروه‌های مستثنی: {len(t.get('excluded') or [])} از {len(t.get('groups') or [])}",
+    ]
+    if t.get("last_ts"):
+        lines.append(f"📨 آخرین دور: {t.get('last_sent', 0)} موفق، {t.get('last_failed', 0)} ناموفق")
+    lines.append(f"📊 مجموع: {t.get('sent_total', 0)} موفق، {t.get('failed_total', 0)} ناموفق")
+    lines.append("\n👇 با دکمه‌ها مدیریت کن:")
+    return "\n".join(lines)
+
+def get_tabchi_keyboard(uid, state):
+    t = (state or {}).get("settings", {}).get("tabchi", {})
+    active = bool(t.get("active"))
+    codes = set(t.get("codes") or [])
+    banners_list = t.get("banners") or []
+    rounds_txt = "∞" if t.get("max_rounds") is None else str(t.get("max_rounds"))
+    rows = [
+        [btn(("🟢 روشن" if active else "🔴 خاموش") + " (ضربه برای تغییر)", f"p:tg:{uid}:tabchi_toggle:tabchi", style_on(active))],
+        [btn("▶️ ارسال فوری یک دور", f"p:tg:{uid}:tabchi_round_now:tabchi", S("p"))],
+        [btn(f"⏱ فاصله: {_fmt_secs_h(t.get('interval', 300))}", f"p:tg:{uid}:tabchi_interval_cycle:tabchi", S("p")),
+         btn(f"🔁 دورها: {rounds_txt}", f"p:tg:{uid}:tabchi_rounds_cycle:tabchi", S("p"))],
+    ]
+    if banners_list:
+        row = []
+        for b in banners_list:
+            on = b["code"] in codes
+            row.append(btn(("✅ " if on else "◻️ ") + b["code"], f"p:tg:{uid}:tabchi_code-{b['code']}:tabchi", style_on(on)))
+            if len(row) == 3:
+                rows.append(row); row = []
+        if row: rows.append(row)
+    else:
+        rows.append([btn("ℹ️ اول با «تنظیم بنر» یک بنر بساز", f"p:tabchi:{uid}", S("s"))])
+    rows.append([btn(f"📋 گروه‌ها ({len(t.get('groups') or [])})", f"p:tgpage:{uid}:1", S("p")),
+                 btn("🔄 بروزرسانی گروه‌ها", f"p:tg:{uid}:tabchi_groups_refresh:tabchi", S("p"))])
+    rows.append([btn("🔙 بازگشت", f"p:pg:{uid}:{CAT_PAGE.get('tabchi', 3)}", S("p"))])
+    return InlineKeyboardMarkup(rows)
+
+def tabchi_groups_view(uid, state, page=1):
+    t = (state or {}).get("settings", {}).get("tabchi", {})
+    groups = t.get("groups") or []
+    excluded = set(t.get("excluded") or [])
+    total = len(groups)
+    pages = max(1, (total + TABCHI_GROUPS_PER_PAGE - 1) // TABCHI_GROUPS_PER_PAGE)
+    page = max(1, min(page, pages))
+    start = (page - 1) * TABCHI_GROUPS_PER_PAGE
+    chunk = groups[start:start + TABCHI_GROUPS_PER_PAGE]
+    if not chunk:
+        text = ("📋 <b>گروه‌های تبچی</b>\n\nهیچ گروهی پیدا نشد. از «🔄 بروزرسانی گروه‌ها» "
+                "در صفحه تبچی استفاده کن (سلف باید عضو حداقل یک گروه باشد).")
+    else:
+        text = (f"📋 <b>گروه‌های تبچی</b> ({total} گروه) — صفحه {page} از {pages}\n\n"
+                "روی هر گروه بزن تا فعال/مستثنی شود:\n"
+                "✅ در چرخه ارسال می‌شود  |  🚫 مستثنی شده، برای بقیه ادامه دارد")
+    rows = []
+    for g in chunk:
+        gid = str(g["id"])
+        on = gid not in excluded
+        rows.append([btn(("✅ " if on else "🚫 ") + g["title"],
+                         f"p:tg:{uid}:tabchi_excl-{gid}:tgp_{page}", style_on(on))])
+    nav = []
+    if page > 1: nav.append(btn("◀ قبلی", f"p:tgpage:{uid}:{page - 1}", S("p")))
+    nav.append(btn(f"• {page}/{pages} •", f"p:tgpage:{uid}:{page}", S("s")))
+    if page < pages: nav.append(btn("بعدی ▶", f"p:tgpage:{uid}:{page + 1}", S("p")))
+    rows.append(nav)
+    rows.append([btn("🔙 بازگشت به تبچی", f"p:cat:{uid}:tabchi", S("p"))])
+    return text, InlineKeyboardMarkup(rows)
+
 SUB_PAGES = {
     "live": (settings_page_text, get_live_keyboard),
     "actions": (actions_page_text, get_actions_keyboard),
     "formats": (formats_page_text, get_formats_keyboard),
     "locks": (locks_page_text, get_locks_keyboard),
+    "tabchi": (tabchi_page_text, get_tabchi_keyboard),
 }
 
 # ==============================================================================
@@ -1206,12 +1298,26 @@ async def _callback_query_handler(client, cq):
         return
 
     if action == "cat":
+        if arg in SUB_PAGES:
+            st = load_self_state()
+            text_fn, kb_fn = SUB_PAGES[arg]
+            await edit_view(client, cq, text_fn(st), kb_fn(uid, st))
+            await cq.answer()
+            return
         t, kb = cat_view(uid, arg, load_self_state())
         if t:
             await edit_view(client, cq, t, kb)
             await cq.answer()
         else:
             await cq.answer("این بخش آماده نیست!", show_alert=True)
+        return
+
+    if action == "tgpage":
+        st = load_self_state()
+        page = int(arg) if arg.isdigit() else 1
+        t, kb = tabchi_groups_view(uid, st, page)
+        await edit_view(client, cq, t, kb)
+        await cq.answer()
         return
 
     if action == "account":
@@ -1241,6 +1347,10 @@ async def _callback_query_handler(client, cq):
                 t, kb = cat_view(uid, extra[2:], st)
                 if t:
                     await edit_view(client, cq, t, kb)
+            elif extra.startswith("tgp_"):
+                page = int(extra[4:]) if extra[4:].isdigit() else 1
+                t, kb = tabchi_groups_view(uid, st, page)
+                await edit_view(client, cq, t, kb)
             else:
                 parent = extra if extra in SUB_PAGES else "live"
                 text_fn, kb_fn = SUB_PAGES[parent]
