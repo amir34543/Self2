@@ -122,8 +122,27 @@ tabchi = jload(TABCHI_FILE, {
     "active": False, "codes": [], "idx": 0, "interval": 300, "max_rounds": None,
     "rounds_done": 0, "last_run": 0.0,
     "sent_total": 0, "failed_total": 0, "last_sent": 0, "last_failed": 0, "last_ts": 0.0,
+    "excluded": [],
 })
+tabchi.setdefault("excluded", [])
 def tabchi_save(): jsave(TABCHI_FILE, tabchi)
+
+TABCHI_INTERVAL_PRESETS = [60, 300, 600, 1800, 3600]     # ۱، ۵، ۱۰، ۳۰، ۶۰ دقیقه
+TABCHI_ROUNDS_PRESETS = [1, 5, 10, 20, None]             # None = نامحدود
+_tabchi_groups_cache = {"ts": 0.0, "list": []}
+
+async def _tabchi_refresh_groups():
+    """گروه‌ها/سوپرگروه‌ها را برای نمایش دکمه‌ای در پنل کش می‌کند (هر ۲ دقیقه یا با دکمه بروزرسانی)"""
+    try:
+        items = []
+        async for d in app.get_dialogs(limit=300):
+            if d.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                items.append({"id": d.chat.id, "title": (d.chat.title or "بدون‌نام")[:40]})
+        items.sort(key=lambda x: x["title"])
+        _tabchi_groups_cache["list"] = items
+        _tabchi_groups_cache["ts"] = time.time()
+    except Exception as e:
+        print("⚠️ بروزرسانی لیست گروه‌های تبچی ناموفق بود:", repr(e))
 START_TIME = time.time()
 
 # ساعت در اسم: وضعیت باید روی دیسک ذخیره شود وگرنه بعد از هر ری‌استارت
@@ -916,8 +935,9 @@ async def _tabchi_run_round(client):
     text = banners.get(code)
     if text is None: return
     sent = failed = 0
+    excluded = set(tabchi.get("excluded", []))
     async for d in app.get_dialogs(limit=300):
-        if d.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+        if d.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP) and str(d.chat.id) not in excluded:
             try:
                 await app.send_message(d.chat.id, text); sent += 1
                 await asyncio.sleep(4)
@@ -934,11 +954,36 @@ async def _tabchi_run_round(client):
     tabchi_save()
 
 @app.on_message(filters.me & filters.regex(
-    r"^(تبچی|تبچی وضعیت|تبچی شروع|تبچی توقف|تبچی کد [\d,\s]+|تبچی تکرار \d+ (\d+|نامحدود|بی نهایت))$"))
+    r"^(تبچی|تبچی وضعیت|تبچی شروع|تبچی توقف|تبچی کد [\d,،\s]+|تبچی تکرار \d+ (\d+|نامحدود|بی نهایت)|"
+    r"تبچی گروه ها|تبچی حذف \d+|تبچی افزودن \d+)$"))
 async def tabchi_cmd(client, message):
     t = message.text.strip()
     if t in ("تبچی", "تبچی وضعیت"):
         return await message.edit(_tabchi_status_text())
+    if t == "تبچی گروه ها":
+        if not _tabchi_groups_cache["list"]:
+            await _tabchi_refresh_groups()
+        gl = _tabchi_groups_cache["list"]
+        if not gl: return await message.edit("❌ هیچ گروهی پیدا نشد")
+        excluded = set(tabchi.get("excluded", []))
+        lines = ["📋 **گروه‌های تبچی** (برای مستثنی‌کردن: `تبچی حذف شماره`)\n"]
+        for i, g in enumerate(gl[:60], 1):
+            mark = "🚫" if str(g["id"]) in excluded else "✅"
+            lines.append(f"{i}. {mark} {g['title']}")
+        if len(gl) > 60: lines.append(f"\n… و {len(gl) - 60} گروه دیگر (از پنل ببین)")
+        return await message.edit("\n".join(lines))
+    if t.startswith("تبچی حذف") or t.startswith("تبچی افزودن"):
+        add = t.startswith("تبچی افزودن")
+        idx = int(t.split()[-1])
+        gl = _tabchi_groups_cache["list"]
+        if not gl or idx < 1 or idx > len(gl):
+            return await message.edit("❌ شماره نامعتبر؛ اول `تبچی گروه ها` بزن")
+        gid = str(gl[idx - 1]["id"])
+        if add: tabchi["excluded"] = [e for e in tabchi["excluded"] if e != gid]
+        elif gid not in tabchi["excluded"]: tabchi["excluded"].append(gid)
+        tabchi_save()
+        verb = "به چرخه اضافه شد" if add else "از چرخه تبچی مستثنی شد"
+        return await message.edit(f"✅ «{gl[idx - 1]['title']}» {verb}")
     if t.startswith("تبچی کد"):
         codes = [c.strip() for c in re.split(r"[,،\s]+", t[len("تبچی کد"):].strip()) if c.strip()]
         bad = [c for c in codes if c not in banners]
@@ -3616,6 +3661,15 @@ async def build_panel_state():
             "guard_links": feat["guard_links"], "secretary_on": feat["secretary_on"],
             "filter_pv": feat["filter_pv"], "filter_groups": feat["filter_groups"], "guard_pv": feat["guard_pv"],
             "timed_save_on": feat["timed_save"],
+            "tabchi": {
+                "active": tabchi["active"], "codes": tabchi["codes"], "interval": tabchi["interval"],
+                "max_rounds": tabchi["max_rounds"], "rounds_done": tabchi["rounds_done"],
+                "sent_total": tabchi["sent_total"], "failed_total": tabchi["failed_total"],
+                "last_sent": tabchi["last_sent"], "last_failed": tabchi["last_failed"], "last_ts": tabchi["last_ts"],
+                "excluded": tabchi["excluded"],
+                "groups": _tabchi_groups_cache["list"],
+                "banners": [{"code": k, "preview": v[:35]} for k, v in banners.items()],
+            },
             "forcejoin_on": feat["forcejoin_on"], "firstcomment_on": feat["firstcomment_on"],
             "actions": dict(action_settings), "formats": dict(format_settings),
             "locks": dict(lock_settings),
@@ -3700,6 +3754,33 @@ async def execute_panel_action(item):
                 pass
             user_time_status[me.id] = False
             _save_time_state()
+        elif name == "tabchi_toggle":
+            tabchi["active"] = not tabchi["active"]
+            if tabchi["active"]: tabchi["last_run"] = 0.0     # اولین دور بلافاصله فرستاده شود
+            tabchi_save()
+        elif name == "tabchi_round_now":
+            if tabchi["codes"]: _spawn(_tabchi_run_round(app))
+        elif name == "tabchi_groups_refresh":
+            _spawn(_tabchi_refresh_groups())
+        elif name == "tabchi_interval_cycle":
+            cur = tabchi["interval"]
+            nxt = next((v for v in TABCHI_INTERVAL_PRESETS if v > cur), TABCHI_INTERVAL_PRESETS[0])
+            tabchi["interval"] = nxt; tabchi_save()
+        elif name == "tabchi_rounds_cycle":
+            cur = tabchi["max_rounds"]
+            i = TABCHI_ROUNDS_PRESETS.index(cur) if cur in TABCHI_ROUNDS_PRESETS else -1
+            tabchi["max_rounds"] = TABCHI_ROUNDS_PRESETS[(i + 1) % len(TABCHI_ROUNDS_PRESETS)]
+            tabchi["rounds_done"] = 0; tabchi_save()
+        elif name.startswith("tabchi_code-"):
+            code = name[len("tabchi_code-"):]
+            if code in tabchi["codes"]: tabchi["codes"].remove(code)
+            elif code in banners: tabchi["codes"].append(code)
+            tabchi_save()
+        elif name.startswith("tabchi_excl-"):
+            gid = name[len("tabchi_excl-"):]
+            if gid in tabchi["excluded"]: tabchi["excluded"].remove(gid)
+            else: tabchi["excluded"].append(gid)
+            tabchi_save()
     except Exception: pass
     try: last_action_ts = max(last_action_ts, float(item.get("ts", 0)))
     except Exception: pass
@@ -3767,6 +3848,8 @@ async def banner_loop():
 async def tabchi_loop():
     while True:
         try:
+            if time.time() - _tabchi_groups_cache["ts"] > 120:
+                await _tabchi_refresh_groups()
             if tabchi["active"] and tabchi["codes"] and (time.time() - tabchi["last_run"]) >= tabchi["interval"]:
                 await _tabchi_run_round(app)
         except Exception as e:
