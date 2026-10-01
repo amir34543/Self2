@@ -1,5 +1,5 @@
 from pyrogram import Client, filters, idle, StopPropagation
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButtonStyle, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, CallbackQuery
 from pyrogram.errors import SessionPasswordNeeded, MessageNotModified, AuthKeyUnregistered
 import json, os, asyncio, subprocess, sys, time, threading, random
 import html, re, zipfile, shutil
@@ -8,6 +8,7 @@ import aiohttp
 from pyrogram import enums
 
 logging.basicConfig(level=logging.INFO)
+PyrogramInlineKeyboardButton = InlineKeyboardButton
 
 # 💾 ذخیره‌سازی ماندگار: اگر Volume در /data مانت شده باشد،
 # دیتابیس و سشن‌ها آنجا ذخیره می‌شوند تا با هر دیپلوی پاک نشوند
@@ -37,8 +38,231 @@ def send_async(coro):
 
 user_temp_codes = {}
 active_clients = {}
-BOT_TOKEN = "8868043854:AAHblyKRa-DbGHefUp7q8_Zw675JTfBdgBw"
+BOT_TOKEN = "8966579009:AAGC5m4hzCPdbjlB7MNRAfLYMghzmLuzqlQ"
 ADMIN_ID = 8953488723
+
+# 💎✨ ایموجی‌های پرمیوم اختصاصی
+# هر کلید = ایموجی استاندارد، هر مقدار = custom_emoji_id همان دسته
+PREMIUM_CUSTOM_EMOJI_IDS = {
+    # الماس / موجودی / پاداش
+    "💎": "4956719506027185156",
+
+    # پول و پرداخت
+    "💸": "5965097893491642896",
+    "💰": "5965097893491642896",
+    "💵": "5965097893491642896",
+    "💳": "5965097893491642896",
+    "🪙": "5965097893491642896",
+    "💶": "5965097893491642896",
+    "💷": "5965097893491642896",
+    "💴": "5965097893491642896",
+    "💲": "5965097893491642896",
+
+    # مدیریت / تاج
+    "👑": "5769547529993588669",
+    "⚙️": "5769547529993588669",
+    "⚙": "5769547529993588669",
+    "🔧": "5769547529993588669",
+    "🛠️": "5769547529993588669",
+    "🛠": "5769547529993588669",
+
+    # بازی
+    "🎮": "5199800485883685380",
+
+    # پشتیبانی
+    "👨‍💻": "5958416857114350105",
+
+    # کاربر / زیرمجموعه
+    "👤": "5249053508681883137",
+    "👥": "5249053508681883137",
+
+    # جام
+    "🏆": "5465423352485141511",
+
+    # آمار
+    "📊": "5231200819986047254",
+
+    # مدال
+    "🏅": "5440539497383087970",
+
+    # رعد و برق
+    "⚡️": "5469969064266838878",
+    "⚡": "5469969064266838878",
+
+    # اعلان / کانال
+    "📣": "5424818078833715060",
+
+    # کازینو / گردونه
+    "🎰": "5102856631562011824",
+
+    # موبایل / گوشی
+    "📱": "5330237710655306682",
+
+    # ساعت
+    "⏰": "5285409457654737374",
+
+    # شارژ
+    "🔋": "5248977066853943059",
+
+    # بات
+    "🤖": "5309832892262654231",
+}
+
+DIAMOND_CUSTOM_EMOJI_ID = PREMIUM_CUSTOM_EMOJI_IDS["💎"]
+DIAMOND_CUSTOM_EMOJI_TAG = (
+    f'<tg-emoji emoji-id="{DIAMOND_CUSTOM_EMOJI_ID}">💎</tg-emoji>'
+)
+
+# اولویت با رشته‌های طولانی‌تر است تا مثلاً ⚡️ قبل از ⚡ جایگزین شود.
+_PREMIUM_EMOJI_KEYS = sorted(PREMIUM_CUSTOM_EMOJI_IDS, key=len, reverse=True)
+_PREMIUM_TAG_BY_EMOJI = {
+    emoji: f'<tg-emoji emoji-id="{emoji_id}">{emoji}</tg-emoji>'
+    for emoji, emoji_id in PREMIUM_CUSTOM_EMOJI_IDS.items()
+}
+_PREMIUM_TAG_RE = re.compile(r"<tg-emoji\b[^>]*>.*?</tg-emoji>", re.DOTALL)
+
+
+def _premiumize_text(value):
+    """تمام ایموجی‌های تعریف‌شده را در متن خروجی به Custom Emoji تبدیل می‌کند.
+    تگ‌های tg-emoji از قبل موجود محافظت می‌شوند تا تو در تو نشوند.
+    """
+    if not isinstance(value, str):
+        return value
+    if not any(e in value for e in _PREMIUM_EMOJI_KEYS):
+        return value
+
+    protected = []
+
+    def _protect(match):
+        token = f"\uFFF0PEMOJI{len(protected)}\uFFF1"
+        protected.append(match.group(0))
+        return token
+
+    result = _PREMIUM_TAG_RE.sub(_protect, value)
+    for emoji in _PREMIUM_EMOJI_KEYS:
+        result = result.replace(emoji, _PREMIUM_TAG_BY_EMOJI[emoji])
+
+    for i, tag in enumerate(protected):
+        result = result.replace(f"\uFFF0PEMOJI{i}\uFFF1", tag)
+    return result
+
+
+# نام قدیمی برای سازگاری با کدهای قبلی سورس
+def _premiumize_diamond_text(value):
+    return _premiumize_text(value)
+
+
+class PremiumInlineKeyboardButton(PyrogramInlineKeyboardButton):
+    """همه دکمه‌های Inline را هنگام ساخته‌شدن به آیکون پرمیوم مناسب مجهز می‌کند."""
+    def __init__(self, *args, **kwargs):
+        text = kwargs.get("text")
+        if text is None and args:
+            text = args[0]
+        text = "" if text is None else str(text)
+
+        if text and not kwargs.get("icon_custom_emoji_id"):
+            matched = next((e for e in _PREMIUM_EMOJI_KEYS if e in text), None)
+            if matched:
+                kwargs["icon_custom_emoji_id"] = PREMIUM_CUSTOM_EMOJI_IDS[matched]
+                clean = text
+                for emoji in _PREMIUM_EMOJI_KEYS:
+                    clean = clean.replace(emoji, "")
+                clean = clean.strip() or " "
+                if args:
+                    args = (clean, *args[1:])
+                else:
+                    kwargs["text"] = clean
+
+        try:
+            super().__init__(*args, **kwargs)
+        except (TypeError, ValueError):
+            # سازگاری با نسخه‌های کتابخانه که icon_custom_emoji_id را نشناسند
+            kwargs.pop("icon_custom_emoji_id", None)
+            fallback = text
+            if args:
+                args = (fallback, *args[1:])
+            else:
+                kwargs["text"] = fallback
+            super().__init__(*args, **kwargs)
+
+
+# از این نقطه به بعد هر InlineKeyboardButton جدید از نسخه پرمیوم استفاده می‌کند.
+InlineKeyboardButton = PremiumInlineKeyboardButton
+
+
+def _install_premium_message_wrappers():
+    """تمام متدهای ارسال/ویرایش پیام Pyrogram را برای Custom Emoji پوشش می‌دهد.
+    این کار باعث می‌شود حتی message.reply_text / message.edit_text هم پوشش داده شوند.
+    """
+    wrappers = {
+        "reply_text": (0, "text"),
+        "edit_text": (0, "text"),
+        "reply_photo": (1, "caption"),
+        "edit_caption": (0, "caption"),
+        "reply_document": (1, "caption"),
+        "reply_animation": (1, "caption"),
+        "reply_video": (1, "caption"),
+        "reply_audio": (1, "caption"),
+        "reply_voice": (1, "caption"),
+    }
+
+    for method_name, (index, kw_name) in wrappers.items():
+        original = getattr(Message, method_name, None)
+        if original is None or getattr(original, "__premium_wrapped__", False):
+            continue
+
+        async def wrapped(self, *args, __original=original, __index=index, __kw_name=kw_name, **kwargs):
+            if __kw_name in kwargs and isinstance(kwargs[__kw_name], str):
+                kwargs[__kw_name] = _premiumize_text(kwargs[__kw_name])
+            elif len(args) > __index and isinstance(args[__index], str):
+                args = list(args)
+                args[__index] = _premiumize_text(args[__index])
+                args = tuple(args)
+            return await __original(self, *args, **kwargs)
+
+        wrapped.__premium_wrapped__ = True
+        setattr(Message, method_name, wrapped)
+
+
+_install_premium_message_wrappers()
+
+
+def _premium_button(label, **kwargs):
+    """دکمه Inline با icon_custom_emoji_id متناسب با ایموجی متن.
+    اگر کتابخانه نصب‌شده پشتیبانی نکند، به دکمه معمولی fallback می‌شود.
+    """
+    text = str(label)
+    matched_emoji = next((e for e in _PREMIUM_EMOJI_KEYS if e in text), None)
+    if matched_emoji:
+        emoji_id = PREMIUM_CUSTOM_EMOJI_IDS[matched_emoji]
+        # خود ایموجی را از متن حذف می‌کنیم چون آیکون پرمیوم از طریق
+        # icon_custom_emoji_id نمایش داده می‌شود.
+        clean_label = text
+        for emoji in _PREMIUM_EMOJI_KEYS:
+            clean_label = clean_label.replace(emoji, "")
+        clean_label = clean_label.strip() or " "
+        try:
+            return InlineKeyboardButton(
+                clean_label,
+                icon_custom_emoji_id=emoji_id,
+                **kwargs
+            )
+        except (TypeError, ValueError):
+            return InlineKeyboardButton(text, **kwargs)
+    return InlineKeyboardButton(text, **kwargs)
+
+
+def _diamond_button(label, **kwargs):
+    # سازگاری با نسخه‌های قبلی سورس
+    return _premium_button(label, **kwargs)
+
+
+print(
+    "✨ Premium custom emojis enabled: "
+    + ", ".join(f"{emoji}={emoji_id}" for emoji, emoji_id in PREMIUM_CUSTOM_EMOJI_IDS.items()),
+    flush=True,
+)
+
 
 SUPPORT_USERNAME = "Aliconfigs"
 BUY_CHANNEL_USERNAME = "SelfPersiangulf"
@@ -541,7 +765,134 @@ API_CREDENTIALS = [
 def get_random_api():
     return random.choice(API_CREDENTIALS)
 
-bot = Client("bot", bot_token=BOT_TOKEN, api_id=API_CREDENTIALS[0]["api_id"], api_hash=API_CREDENTIALS[0]["api_hash"])
+class PremiumEmojiBot(Client):
+    """Client ربات که متن/کپشن‌های خروجی و دکمه‌های Inline را پرمیوم می‌کند."""
+
+    @staticmethod
+    def _replace_positional(args, index):
+        if len(args) > index and isinstance(args[index], str):
+            args = list(args)
+            args[index] = _premiumize_text(args[index])
+            return tuple(args)
+        return args
+
+    @staticmethod
+    def _process_reply_markup(reply_markup):
+        """تمام InlineKeyboardButtonهای داخل markup را با icon پرمیوم بازسازی می‌کند."""
+        if not isinstance(reply_markup, InlineKeyboardMarkup):
+            return reply_markup
+        rows = []
+        changed = False
+        for row in (reply_markup.inline_keyboard or []):
+            new_row = []
+            for button in row:
+                try:
+                    original_text = getattr(button, "text", "") or ""
+                    matched_emoji = next((e for e in _PREMIUM_EMOJI_KEYS if e in original_text), None)
+                    if matched_emoji and not getattr(button, "icon_custom_emoji_id", None):
+                        kwargs = {}
+                        for attr in (
+                            "url", "callback_data", "web_app", "login_url", "switch_inline_query",
+                            "switch_inline_query_current_chat", "callback_game", "pay", "style",
+                        ):
+                            if hasattr(button, attr):
+                                value = getattr(button, attr)
+                                if value is not None:
+                                    kwargs[attr] = value
+                        for attr in ("user_id",):
+                            if hasattr(button, attr):
+                                value = getattr(button, attr)
+                                if value is not None:
+                                    kwargs[attr] = value
+                        new_row.append(
+                            _premium_button(
+                                original_text,
+                                **kwargs,
+                            )
+                        )
+                        changed = True
+                    else:
+                        new_row.append(button)
+                except Exception:
+                    new_row.append(button)
+            rows.append(new_row)
+        if not changed:
+            return reply_markup
+        try:
+            return InlineKeyboardMarkup(rows)
+        except Exception:
+            return reply_markup
+
+    @classmethod
+    def _process_kwargs(cls, kwargs):
+        if "text" in kwargs and isinstance(kwargs["text"], str):
+            kwargs["text"] = _premiumize_text(kwargs["text"])
+        if "caption" in kwargs and isinstance(kwargs["caption"], str):
+            kwargs["caption"] = _premiumize_text(kwargs["caption"])
+        if "reply_markup" in kwargs:
+            kwargs["reply_markup"] = cls._process_reply_markup(kwargs["reply_markup"])
+        return kwargs
+
+    async def send_message(self, *args, **kwargs):
+        kwargs = self._process_kwargs(kwargs)
+        if not ("text" in kwargs and isinstance(kwargs["text"], str)):
+            args = self._replace_positional(args, 1)
+        return await super().send_message(*args, **kwargs)
+
+    async def edit_message_text(self, *args, **kwargs):
+        kwargs = self._process_kwargs(kwargs)
+        if not ("text" in kwargs and isinstance(kwargs["text"], str)):
+            args = self._replace_positional(args, 2)
+        return await super().edit_message_text(*args, **kwargs)
+
+    async def send_photo(self, *args, **kwargs):
+        kwargs = self._process_kwargs(kwargs)
+        if not ("caption" in kwargs and isinstance(kwargs["caption"], str)):
+            args = self._replace_positional(args, 2)
+        return await super().send_photo(*args, **kwargs)
+
+    async def edit_message_caption(self, *args, **kwargs):
+        kwargs = self._process_kwargs(kwargs)
+        if not ("caption" in kwargs and isinstance(kwargs["caption"], str)):
+            args = self._replace_positional(args, 2)
+        return await super().edit_message_caption(*args, **kwargs)
+
+    async def send_document(self, *args, **kwargs):
+        kwargs = self._process_kwargs(kwargs)
+        if not ("caption" in kwargs and isinstance(kwargs["caption"], str)):
+            args = self._replace_positional(args, 2)
+        return await super().send_document(*args, **kwargs)
+
+    async def send_animation(self, *args, **kwargs):
+        kwargs = self._process_kwargs(kwargs)
+        if not ("caption" in kwargs and isinstance(kwargs["caption"], str)):
+            args = self._replace_positional(args, 2)
+        return await super().send_animation(*args, **kwargs)
+
+    async def send_video(self, *args, **kwargs):
+        kwargs = self._process_kwargs(kwargs)
+        if not ("caption" in kwargs and isinstance(kwargs["caption"], str)):
+            args = self._replace_positional(args, 2)
+        return await super().send_video(*args, **kwargs)
+
+    async def send_audio(self, *args, **kwargs):
+        kwargs = self._process_kwargs(kwargs)
+        if not ("caption" in kwargs and isinstance(kwargs["caption"], str)):
+            args = self._replace_positional(args, 2)
+        return await super().send_audio(*args, **kwargs)
+
+    async def send_voice(self, *args, **kwargs):
+        kwargs = self._process_kwargs(kwargs)
+        if not ("caption" in kwargs and isinstance(kwargs["caption"], str)):
+            args = self._replace_positional(args, 2)
+        return await super().send_voice(*args, **kwargs)
+
+bot = PremiumEmojiBot(
+    "bot",
+    bot_token=BOT_TOKEN,
+    api_id=API_CREDENTIALS[0]["api_id"],
+    api_hash=API_CREDENTIALS[0]["api_hash"]
+)
 
 # ==============================================================================
 # 🛡️ مراقبت از سشن بات اصلی — بازیابی خودکار AUTH_KEY_UNREGISTERED روی Railway
@@ -1619,7 +1970,7 @@ def deduct_diamond_callback(user_id):
                     f"💎 فقط **{new_credits} ساعت** باقی مانده!\n"
                     f"برای قطع نشدن سلف، از همین حالا شارژ کن 👇",
                     reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("💎 شارژ الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))
+                        _diamond_button("شارژ الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))
                     ]])
                 ))
             elif new_credits == 1:
@@ -1629,7 +1980,7 @@ def deduct_diamond_callback(user_id):
                     f"بعد از این ساعت سلف موقتاً متوقف می‌شود\n"
                     f"(نگران نباش! با شارژ، بدون ورود مجدد دوباره روشن می‌شود 🚀)",
                     reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("💎 شارژ فوری", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))
+                        _diamond_button("شارژ فوری", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))
                     ]])
                 ))
 
@@ -1646,7 +1997,7 @@ def deduct_diamond_callback(user_id):
                     "✨ **نکته خوب:** اکانت شما خارج نشده و نیازی به ورود مجدد نیست!\n"
                     "بعد از شارژ، فقط یک کلیک تا روشن شدن مجدد داری 👇",
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💎 شارژ الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
+                        [_diamond_button("شارژ الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
                         [InlineKeyboardButton("🚀 روشن کردن مجدد", callback_data="resume_self", style=KeyboardButtonStyle(bg_primary=True))]
                     ])
                 ))
@@ -1665,7 +2016,7 @@ def deduct_diamond_callback(user_id):
                 "⏸ **الماس های شما تمام شد و سلف موقتاً متوقف شد**\n\n"
                 "✨ اکانت شما خارج نشده! بعد از شارژ یک کلیک تا روشن شدن دارید 👇",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💎 شارژ الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
+                    [_diamond_button("شارژ الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
                     [InlineKeyboardButton("🚀 روشن کردن مجدد", callback_data="resume_self", style=KeyboardButtonStyle(bg_primary=True))]
                 ])
             ))
@@ -1893,10 +2244,10 @@ async def group_balance_simple(client, message: Message):
     info = _level_info(lvl)
     toman_value = int(credits * TOMAN_PER_DIAMOND)
     text = "◈ ━━━ persiangulf self ━━━ ◈\n💎 <b>موجودی شما:</b>"
+    # در پاسخ «موجودی» فقط دکمه نمایش لول حذف شده؛ سایر قابلیت‌های لول در کل بات باقی است.
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{info['emoji']} لول {lvl} — {info['title']}", callback_data="mylevel", style=KeyboardButtonStyle(bg_primary=True))],
-        [InlineKeyboardButton(f"💎 {credits:,} الماس", callback_data="balance_noop", style=KeyboardButtonStyle(bg_success=True))],
-        [InlineKeyboardButton(f"💵 معادل {toman_value:,} تومان", callback_data="balance_noop")]
+        [_diamond_button(f"{credits:,} الماس", callback_data="balance_noop", style=KeyboardButtonStyle(bg_success=True))],
+        [_premium_button(f"💵 معادل {toman_value:,} تومان", callback_data="balance_noop")]
     ])
     await message.reply_text(text, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
 
@@ -2051,7 +2402,7 @@ async def admin_panel(client, message: Message):
         [InlineKeyboardButton("👥 لیست کاربران", callback_data="admin_list"), InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
         [InlineKeyboardButton("🏆 برترین کاربران", callback_data="admin_top"), InlineKeyboardButton("🛑 توقف همه", callback_data="admin_stop_all")],
         [InlineKeyboardButton("💳 درخواست پرداخت", callback_data="admin_payments")],
-        [InlineKeyboardButton("💎 الماس همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))],
+        [_diamond_button("الماس همگانی", callback_data="admin_global_coins", style=KeyboardButtonStyle(bg_success=True))],
         [InlineKeyboardButton("💾 دریافت دیتابیس", callback_data="db_download", style=KeyboardButtonStyle(bg_primary=True)),
          InlineKeyboardButton("📤 بازگردانی دیتابیس", callback_data="db_upload", style=KeyboardButtonStyle(bg_danger=True))]
     ])
@@ -2745,7 +3096,7 @@ async def mylevel_handler(client, callback_query):
     uid = callback_query.from_user.id
     profile = build_level_profile(uid)
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💎 خرید الماس (امتیاز بگیر!)", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
+        [_diamond_button("خرید الماس (امتیاز بگیر!)", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
     ])
     await safe_edit_message(callback_query.message, profile, reply_markup=kb)
@@ -3125,7 +3476,7 @@ async def callback_handler(client, callback_query):
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("⚡ فعالسازی سلف", callback_data="activate_self", style=KeyboardButtonStyle(bg_success=True))],
-            [InlineKeyboardButton("💎 خرید الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_primary=True))],
+            [_diamond_button("خرید الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_primary=True))],
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
         ])
         await safe_edit_message(callback_query.message, guide_text, reply_markup=keyboard)
@@ -3288,7 +3639,7 @@ async def callback_handler(client, callback_query):
         elif has_session and credits > 0:
             rows.append([InlineKeyboardButton("🚀 روشن کردن سلف", callback_data="resume_self", style=KeyboardButtonStyle(bg_success=True))])
         rows.append([InlineKeyboardButton("⚡ ورود با اکانت جدید", callback_data="activate_self", style=KeyboardButtonStyle(bg_primary=True))])
-        rows.append([InlineKeyboardButton("💎 خرید الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))])
+        rows.append([_diamond_button("خرید الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_success=True))])
         rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))])
         await safe_edit_message(callback_query.message, text, reply_markup=InlineKeyboardMarkup(rows))
         await callback_query.answer()
@@ -3306,7 +3657,7 @@ async def callback_handler(client, callback_query):
             return
 
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💎 خرید الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_primary=True))],
+            [_diamond_button("خرید الماس", callback_data="increase_balance", style=KeyboardButtonStyle(bg_primary=True))],
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back", style=KeyboardButtonStyle(bg_primary=True))]
         ])
         try:
@@ -3363,7 +3714,7 @@ async def callback_handler(client, callback_query):
         return
 
     if data == "balance_noop":
-        await callback_query.answer("💎")
+        await callback_query.answer("✨")
         return
 
     if data == "check_join":
