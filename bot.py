@@ -38,7 +38,7 @@ def send_async(coro):
 
 user_temp_codes = {}
 active_clients = {}
-BOT_TOKEN = "8868043854:AAHblyKRa-DbGHefUp7q8_Zw675JTfBdgBw"
+BOT_TOKEN = "8605313958:AAFTOJWKd1gkoU8G4ze3tccSVG1lE65dmo8"
 ADMIN_ID = 8953488723
 
 # 💎✨ ایموجی‌های پرمیوم اختصاصی
